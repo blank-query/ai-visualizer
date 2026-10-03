@@ -73,6 +73,12 @@ DEFAULTS = {
     "name": "JARVIS",       # shown on the chip / headers, yours to change
     "badge": "",            # optional handle shown in some faces' chrome
     "face": "board",        # the default face the root URL opens
+    "host": "127.0.0.1",    # bind address. "127.0.0.1" (default) is
+                            # localhost-only; "0.0.0.0" listens on every
+                            # interface, needed to reach this from another
+                            # machine on the LAN. No auth of any kind
+                            # lives here, so only widen this on a network
+                            # you already trust.
     "port": 8790,
     "bus_dir": "",          # where the .voice_* files live ("" = here)
     "thinking_sound": True, # play assets/thinking.wav while thinking
@@ -106,6 +112,7 @@ if "--mock" in sys.argv:
     MOCK = sys.argv[i + 1] if len(sys.argv) > i + 1 else "speaking"
     if MOCK not in STATES:
         MOCK = "speaking"
+HOST = str(CFG.get("host", "127.0.0.1"))
 PORT = int(CFG.get("port", 8790))
 if "--port" in sys.argv:
     i = sys.argv.index("--port")
@@ -266,7 +273,7 @@ if __name__ == "__main__":
     # window closed. The end-user symptom was "I can hear my agent but the
     # face never shows up", with the face running perfectly the entire time.
     try:
-        srv = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
+        srv = ThreadingHTTPServer((HOST, PORT), Handler)
     except OSError as e:
         if e.errno not in (errno.EADDRINUSE, errno.EACCES):
             raise
