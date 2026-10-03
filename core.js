@@ -150,8 +150,13 @@ const AV = (() => {
   function tick(dt) {
     if (DEMO) demoUpdate(dt);
     A.state = raw.state || "idle";
+    // Not "listening": that's while YOU'RE recording, nothing of
+    // Jarvis's own to interrupt yet, and the button popping in the
+    // instant you press reads as noise, not a control.
     if (VI && VI.btn)
-      VI.btn.style.display = A.state === "idle" ? "none" : "block";
+      VI.btn.style.display =
+        (A.state === "thinking" || A.state === "speaking" || VI.btnPressed)
+          ? "block" : "none";
     A.alert = !!raw.alert;
     // Empty unless the voice line was told to publish usage. A face that
     // wants to draw it reads AV.rateLimits; every other face ignores it.
@@ -326,6 +331,14 @@ const AV = (() => {
     viEnsureCapture().then(ok => {
       if (!ok || !VI || !VI.ws || VI.ws.readyState !== 1) return;
       A.recording = true;
+      // A queued tap (not the Interrupt button) pauses playback rather
+      // than touching it: the AudioContext clock freezes, so whatever
+      // was scheduled just picks back up exactly where it left off on
+      // release, nothing lost, nothing restarted.
+      if (!isInterrupt && VI.playCtx && VI.playCtx.state === "running") {
+        VI.playCtx.suspend().catch(() => {});
+        VI.pausedForQueue = true;
+      }
       VI.ws.send(JSON.stringify(
         { type: isInterrupt ? "interrupt_press" : "press" }));
     });
@@ -333,6 +346,10 @@ const AV = (() => {
   function viRelease() {
     if (!VI || !A.recording) return;
     A.recording = false;
+    if (VI.pausedForQueue) {
+      VI.pausedForQueue = false;
+      if (VI.playCtx) VI.playCtx.resume().catch(() => {});
+    }
     if (VI.ws && VI.ws.readyState === 1)
       VI.ws.send(JSON.stringify({ type: "release" }));
   }
@@ -382,10 +399,15 @@ const AV = (() => {
     btn.addEventListener("pointerdown", (e) => {
       e.preventDefault();
       e.stopPropagation();
+      VI.btnPressed = true;   // held through the state flip to "listening"
       viPress(true);
     });
     ["pointerup", "pointercancel", "pointerleave"].forEach(evt =>
-      btn.addEventListener(evt, (e) => { e.stopPropagation(); viRelease(); }));
+      btn.addEventListener(evt, (e) => {
+        e.stopPropagation();
+        VI.btnPressed = false;
+        viRelease();
+      }));
     document.body.appendChild(btn);
     VI = VI || {};   // viConnect() may not have run if backendWs was bad
     VI.btn = btn;
