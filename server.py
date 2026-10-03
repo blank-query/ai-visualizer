@@ -76,6 +76,9 @@ DEFAULTS = {
     "port": 8790,
     "bus_dir": "",          # where the .voice_* files live ("" = here)
     "thinking_sound": True, # play assets/thinking.wav while thinking
+    "backend_ws": "",       # backtalk's browser bridge, e.g.
+                            # "ws://127.0.0.1:8792" — tap/click-to-talk on
+                            # the face. "" leaves it off (default).
 }
 
 
@@ -198,6 +201,7 @@ class Handler(BaseHTTPRequestHandler):
                 out = {"name": CFG["name"], "badge": CFG["badge"],
                        "face": CFG["face"],
                        "thinking_sound": bool(CFG["thinking_sound"]),
+                       "backend_ws": CFG.get("backend_ws", ""),
                        "faces": list_faces()}
                 self._send(json.dumps(out).encode(), "application/json")
             else:

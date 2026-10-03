@@ -69,6 +69,7 @@ const AV = (() => {
     name: "JARVIS", label: "J.A.R.V.I.S.", badge: "",
     demo: DEMO, shot: SHOT, faces: [],
     _sndOn: true, _mic: false, _readyCbs: [], _ready: false,
+    backendWs: "", recording: false,
   };
 
   function dotted(name) {
@@ -83,6 +84,8 @@ const AV = (() => {
     A.badge = String(cfg.badge || "");
     if (cfg.thinking_sound === false) A._sndWant = false;
     A.faces = cfg.faces || [];
+    A.backendWs = String(cfg.backend_ws || "");
+    if (A.backendWs && !DEMO) viInit();
     A._ready = true;
     A._readyCbs.forEach(cb => cb(A));
     A._readyCbs = [];
@@ -207,9 +210,129 @@ const AV = (() => {
       src.connect(an);
       A._micAnalyser = an;
       A._micBuf = new Float32Array(an.fftSize);
+      A._micStream = stream;
       const kick = () => ctx.state === "suspended" && ctx.resume();
       addEventListener("click", kick); addEventListener("keydown", kick);
     } catch (e) { /* no mic permission: level stays 0, faces degrade */ }
+  }
+
+  /* ------------------------------ voice input ------------------------------
+     Tap/click the face to talk: a second push-to-talk, the pointer in
+     place of a key. Only active when the config names a `backend_ws`
+     (backtalk's browser bridge); off by default. One persistent socket,
+     opened at startup so the first tap isn't paying handshake latency.
+     Mic capture is lazy (first press) and reuses whatever stream a
+     face's own mic:true visualization already opened (rain, neural)
+     rather than requesting a second device. */
+  let VI = null;   // { ws, capCtx, proc, mute, playCtx, nextPlayTime }
+  function viConnect() {
+    if (VI && VI.ws && VI.ws.readyState <= 1) return;
+    try {
+      const ws = new WebSocket(A.backendWs);
+      ws.binaryType = "arraybuffer";
+      ws.onmessage = viOnMessage;
+      ws.onclose = () => setTimeout(viConnect, 1500);
+      ws.onerror = () => {};
+      VI = VI || {};
+      VI.ws = ws;
+    } catch (e) { /* bad backend_ws URL: voice input just stays off */ }
+  }
+  function viPlayCtx() {
+    if (!VI.playCtx) { VI.playCtx = new AudioContext(); VI.nextPlayTime = 0; }
+    return VI.playCtx;
+  }
+  function viOnMessage(ev) {
+    if (typeof ev.data === "string") return;   // control frames: nothing to do yet
+    const buf = ev.data;
+    if (buf.byteLength < 4) return;
+    const rate = new DataView(buf).getUint32(0, true);
+    const i16 = new Int16Array(buf.slice(4));
+    const ctx = viPlayCtx();
+    const abuf = ctx.createBuffer(1, i16.length, rate);
+    const chan = abuf.getChannelData(0);
+    for (let i = 0; i < i16.length; i++) chan[i] = i16[i] / 32768;
+    const src = ctx.createBufferSource();
+    src.buffer = abuf;
+    src.connect(ctx.destination);
+    const now = ctx.currentTime;
+    if (VI.nextPlayTime < now + 0.02) VI.nextPlayTime = now + 0.05;
+    src.start(VI.nextPlayTime);
+    VI.nextPlayTime += abuf.duration;
+  }
+  async function viEnsureCapture() {
+    if (VI.proc) return true;
+    try {
+      const stream = A._micStream
+        || await navigator.mediaDevices.getUserMedia({ audio: true });
+      const ctx = new AudioContext({ sampleRate: 16000 });
+      const src = ctx.createMediaStreamSource(stream);
+      // deprecated but universal; AudioWorkletNode is the future upgrade
+      const proc = ctx.createScriptProcessor(4096, 1, 1);
+      proc.onaudioprocess = (e) => {
+        if (!A.recording || !VI.ws || VI.ws.readyState !== 1) return;
+        const input = e.inputBuffer.getChannelData(0);
+        const i16 = new Int16Array(input.length);
+        for (let i = 0; i < input.length; i++) {
+          const s = Math.max(-1, Math.min(1, input[i]));
+          i16[i] = s < 0 ? s * 32768 : s * 32767;
+        }
+        const frame = new Uint8Array(4 + i16.byteLength);
+        new DataView(frame.buffer).setUint32(0, ctx.sampleRate, true);
+        frame.set(new Uint8Array(i16.buffer), 4);
+        VI.ws.send(frame.buffer);
+      };
+      // ScriptProcessorNode only fires once connected; a muted gain
+      // keeps your own mic from coming back out of your own speakers.
+      const mute = ctx.createGain();
+      mute.gain.value = 0;
+      src.connect(proc);
+      proc.connect(mute);
+      mute.connect(ctx.destination);
+      VI.capCtx = ctx; VI.proc = proc; VI.mute = mute;
+      return true;
+    } catch (e) { return false; }
+  }
+  function viPress() {
+    if (!VI || !VI.ws || VI.ws.readyState !== 1) return;
+    viEnsureCapture().then(ok => {
+      if (!ok || !VI || !VI.ws || VI.ws.readyState !== 1) return;
+      A.recording = true;
+      VI.ws.send(JSON.stringify({ type: "press" }));
+    });
+  }
+  function viRelease() {
+    if (!VI || !A.recording) return;
+    A.recording = false;
+    if (VI.ws && VI.ws.readyState === 1)
+      VI.ws.send(JSON.stringify({ type: "release" }));
+  }
+  function viInit() {
+    viConnect();
+    const stage = document.getElementById("stage");
+    if (!stage) return;
+    // The faces hide the cursor (cursor:none in their own CSS) for a
+    // clean look on a passive display. Tapping the face is a real
+    // control now, so a MOUSE needs the cursor visible to aim with —
+    // but only while actually moving, so the clean look returns once
+    // it's been idle a bit. A touchscreen has no cursor to manage;
+    // (pointer: coarse) is the PRIMARY input, so a touchscreen stays
+    // cursor:none exactly as the CSS already has it.
+    if (!matchMedia("(pointer: coarse)").matches) {
+      let cursorHideT = null;
+      const cursorShow = () => {
+        document.body.style.cursor = "default";
+        clearTimeout(cursorHideT);
+        cursorHideT = setTimeout(() => {
+          document.body.style.cursor = "none";
+        }, 1500);
+      };
+      addEventListener("mousemove", cursorShow);
+      cursorShow();
+    }
+    stage.style.touchAction = "none";
+    stage.addEventListener("pointerdown", (e) => { e.preventDefault(); viPress(); });
+    ["pointerup", "pointercancel", "pointerleave"].forEach(evt =>
+      stage.addEventListener(evt, viRelease));
   }
 
   /* ----------------------------- thinking sound ---------------------------- */
