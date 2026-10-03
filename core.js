@@ -150,6 +150,8 @@ const AV = (() => {
   function tick(dt) {
     if (DEMO) demoUpdate(dt);
     A.state = raw.state || "idle";
+    if (VI && VI.btn)
+      VI.btn.style.display = A.state === "idle" ? "none" : "block";
     A.alert = !!raw.alert;
     // Empty unless the voice line was told to publish usage. A face that
     // wants to draw it reads AV.rateLimits; every other face ignores it.
@@ -223,8 +225,16 @@ const AV = (() => {
      opened at startup so the first tap isn't paying handshake latency.
      Mic capture is lazy (first press) and reuses whatever stream a
      face's own mic:true visualization already opened (rain, neural)
-     rather than requesting a second device. */
-  let VI = null;   // { ws, capCtx, proc, mute, playCtx, nextPlayTime }
+     rather than requesting a second device.
+
+     Tap anywhere on the face = talk, in every state — while idle it's
+     the only turn, while Jarvis is working it QUEUES behind the
+     current one (the backend's turn-stream reader lines it up; nothing
+     here stops anything). The one Interrupt button (shown only while
+     working) is the sole way to actually stop a reply: it sends
+     interrupt_press instead of press, and a "stop" control frame back
+     from the server clears whatever audio is already scheduled here. */
+  let VI = null;   // { ws, capCtx, proc, mute, playCtx, nextPlayTime, sources, btn }
   function viConnect() {
     if (VI && VI.ws && VI.ws.readyState <= 1) return;
     try {
@@ -242,7 +252,13 @@ const AV = (() => {
     return VI.playCtx;
   }
   function viOnMessage(ev) {
-    if (typeof ev.data === "string") return;   // control frames: nothing to do yet
+    if (typeof ev.data === "string") {
+      try {
+        const msg = JSON.parse(ev.data);
+        if (msg.type === "stop") viStopPlayback();
+      } catch (e) { /* ignore */ }
+      return;
+    }
     const buf = ev.data;
     if (buf.byteLength < 4) return;
     const rate = new DataView(buf).getUint32(0, true);
@@ -258,6 +274,19 @@ const AV = (() => {
     if (VI.nextPlayTime < now + 0.02) VI.nextPlayTime = now + 0.05;
     src.start(VI.nextPlayTime);
     VI.nextPlayTime += abuf.duration;
+    VI.sources = VI.sources || [];
+    VI.sources.push(src);
+    src.onended = () => {
+      const i = VI.sources.indexOf(src);
+      if (i >= 0) VI.sources.splice(i, 1);
+    };
+  }
+  function viStopPlayback() {
+    // An interrupt: every chunk already sent but not yet played gets
+    // discarded, mirroring mouth.shut_up() on the server side.
+    (VI.sources || []).forEach(src => { try { src.stop(); } catch (e) {} });
+    VI.sources = [];
+    if (VI.playCtx) VI.nextPlayTime = VI.playCtx.currentTime;
   }
   async function viEnsureCapture() {
     if (VI.proc) return true;
@@ -292,12 +321,13 @@ const AV = (() => {
       return true;
     } catch (e) { return false; }
   }
-  function viPress() {
+  function viPress(isInterrupt) {
     if (!VI || !VI.ws || VI.ws.readyState !== 1) return;
     viEnsureCapture().then(ok => {
       if (!ok || !VI || !VI.ws || VI.ws.readyState !== 1) return;
       A.recording = true;
-      VI.ws.send(JSON.stringify({ type: "press" }));
+      VI.ws.send(JSON.stringify(
+        { type: isInterrupt ? "interrupt_press" : "press" }));
     });
   }
   function viRelease() {
@@ -330,9 +360,35 @@ const AV = (() => {
       cursorShow();
     }
     stage.style.touchAction = "none";
-    stage.addEventListener("pointerdown", (e) => { e.preventDefault(); viPress(); });
+    stage.addEventListener("pointerdown", (e) => { e.preventDefault(); viPress(false); });
     ["pointerup", "pointercancel", "pointerleave"].forEach(evt =>
-      stage.addEventListener(evt, viRelease));
+      stage.addEventListener(evt, () => viRelease()));
+
+    // ONE Interrupt button, shown only while Jarvis is working (tick()
+    // toggles it via A.state). It's a separate element appended to
+    // <body>, not a child of #stage, so its taps never reach the
+    // stage's tap-anywhere-queues handler above — no event plumbing
+    // needed to keep them apart, they're just not in the same subtree.
+    const btn = document.createElement("div");
+    btn.textContent = "INTERRUPT";
+    btn.style.cssText =
+      "position:fixed;left:50%;bottom:28px;transform:translateX(-50%);" +
+      "z-index:60;display:none;padding:18px 36px;border-radius:40px;" +
+      "font:bold 15px 'SF Mono',Menlo,Consolas,monospace;" +
+      "letter-spacing:.15em;color:#fff;background:rgba(200,30,30,.85);" +
+      "border:2px solid rgba(255,255,255,.4);cursor:pointer;" +
+      "touch-action:none;user-select:none;" +
+      "box-shadow:0 2px 16px rgba(200,30,30,.5)";
+    btn.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      viPress(true);
+    });
+    ["pointerup", "pointercancel", "pointerleave"].forEach(evt =>
+      btn.addEventListener(evt, (e) => { e.stopPropagation(); viRelease(); }));
+    document.body.appendChild(btn);
+    VI = VI || {};   // viConnect() may not have run if backendWs was bad
+    VI.btn = btn;
   }
 
   /* ----------------------------- thinking sound ---------------------------- */
