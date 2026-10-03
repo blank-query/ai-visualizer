@@ -94,6 +94,10 @@ const AV = (() => {
   A.ready = cb => { A._ready ? cb(A) : A._readyCbs.push(cb); };
 
   /* ------------------------------ bus polling ------------------------------ */
+  const TASKS_PREVIEW = (() => {
+    const v = new URLSearchParams(location.search).get("tasks");
+    return v === null ? null : Math.max(0, parseInt(v, 10) || 0);
+  })();
   let raw = { state: "idle", level: 0, samples: null, alert: false,
               loading: false };
   if (!DEMO) {
@@ -158,6 +162,9 @@ const AV = (() => {
         (A.state === "thinking" || A.state === "speaking" || VI.btnPressed)
           ? "block" : "none";
     A.alert = !!raw.alert;
+    // Running background tasks (satellites). ?tasks=N in the URL forces a
+    // count, to preview the look before the voice line publishes one.
+    A.tasks = TASKS_PREVIEW !== null ? TASKS_PREVIEW : Math.max(0, raw.tasks | 0);
     // Empty unless the voice line was told to publish usage. A face that
     // wants to draw it reads AV.rateLimits; every other face ignores it.
     A.rateLimits = raw.rate_limits || {};
@@ -328,6 +335,13 @@ const AV = (() => {
   }
   function viPress(isInterrupt) {
     if (!VI || !VI.ws || VI.ws.readyState !== 1) return;
+    // Create/resume the playback context HERE, synchronously inside
+    // the user gesture. Left to happen later (e.g. the first time a
+    // reply chunk actually arrives, well outside any gesture) it hits
+    // autoplay policy: the context stays suspended, every part of the
+    // pipeline runs without error, and no sound ever comes out.
+    const pctx = viPlayCtx();
+    if (pctx.state === "suspended") pctx.resume().catch(() => {});
     viEnsureCapture().then(ok => {
       if (!ok || !VI || !VI.ws || VI.ws.readyState !== 1) return;
       A.recording = true;
