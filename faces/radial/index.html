@@ -623,12 +623,16 @@ function frame(dt){
   {
     const S=orb.S;
     const half=S/2;
+    // Backing disc and rings follow the CURRENT orb size, not the orb
+    // canvas: the canvas only ever grows, so after the window shrinks it
+    // is oversized and a disc sized from it covered the starburst.
+    const D=Math.max(64,baseSize);
     ctx.fillStyle="rgb(4,12,8)";
-    ctx.beginPath();ctx.arc(cxp,cyp,S*.44/1.55,0,6.29);ctx.fill();
+    ctx.beginPath();ctx.arc(cxp,cyp,D*.44,0,6.29);ctx.fill();
     ctx.globalCompositeOperation="lighter";
     ctx.drawImage(orbSurf,cxp-half,cyp-half);
     ctx.globalCompositeOperation="source-over";
-    const rRing=S*.50/1.55;                       // canvas is 1.55x the orb
+    const rRing=D*.50;
     ctx.strokeStyle="rgb(60,150,95)";ctx.lineWidth=1;
     ctx.beginPath();ctx.arc(cxp,cyp,rRing,0,6.29);ctx.stroke();
     ctx.strokeStyle="rgb(47,107,70)";
