@@ -392,10 +392,12 @@ const AV = (() => {
       "position:fixed;left:50%;bottom:28px;transform:translateX(-50%);" +
       "z-index:60;display:none;padding:18px 36px;border-radius:40px;" +
       "font:bold 15px 'SF Mono',Menlo,Consolas,monospace;" +
-      "letter-spacing:.15em;color:#fff;background:rgba(200,30,30,.85);" +
-      "border:2px solid rgba(255,255,255,.4);cursor:pointer;" +
+      "letter-spacing:.15em;color:rgba(255,235,235,.92);" +
+      "background:rgba(200,30,30,.38);" +
+      "-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);" +
+      "border:1px solid rgba(255,140,140,.45);cursor:pointer;" +
       "touch-action:none;user-select:none;" +
-      "box-shadow:0 2px 16px rgba(200,30,30,.5)";
+      "box-shadow:0 0 18px rgba(220,40,40,.35),inset 0 0 12px rgba(255,90,90,.18)";
     btn.addEventListener("pointerdown", (e) => {
       e.preventDefault();
       e.stopPropagation();
