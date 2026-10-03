@@ -39,7 +39,9 @@ SPDX-License-Identifier: AGPL-3.0-or-later
    spectrum bars are blended into each other and drawn as ONE
    soft, closed membrane (smooth curves, not spokes) that swells
    and ripples like an amoeba, with a slow wobble so it never
-   holds still. Everything else is The Radial, unchanged.
+   holds still. States are remapped: idle = constellation only;
+   listening = sonar ripples; thinking = amber tick wheel + HUD arcs;
+   satellites = running background tasks only (one each), any state.
    Original radial notes follow.
 
    A full radial starburst of 80 spectrum bars around a living
@@ -69,7 +71,7 @@ const BG="#050907";
 const BAR_COLORS=[[16,74,38],[26,118,60],[40,170,86],[74,240,122],[105,250,150],[160,255,195]];
 const SMOOTHING=.3, GRAVITY=.92;
 const SENSITIVITY=.55;
-const MAX_PARTICLES=300, SPAWN_THRESHOLD=.6;
+const MAX_PARTICLES=300, SPAWN_THRESHOLD=.8;   // bio-radial: was .6 (too many particles at low MEM_GAIN)
 const ALERT_INNER=[255,30,20], ALERT_OUTER=[200,10,10];
 
 const cv=document.getElementById("stage"), ctx=cv.getContext("2d");
@@ -315,14 +317,14 @@ function drawGalaxy(dt60){
 
 /* ---------------- idle + working ornaments ---------------- */
 const ripples=[];let rippleCool=0;
-function drawSonar(cxp,cyp,innerR,maxLen,dt60){
-  if(--rippleCool<=0){
+function drawSonar(cxp,cyp,innerR,maxLen,dt60,spawn){
+  if(spawn&&--rippleCool<=0){
     ripples.push([innerR*1.15,110]);
     rippleCool=150+Math.random()*90|0;
   }
   const maxR=innerR+maxLen;
   for(const rp of ripples){
-    rp[0]+=1.6*dt60;rp[1]-=.55*dt60;
+    rp[0]+=1.6*dt60;rp[1]-=(spawn?.55:4)*dt60;      // fade fast once listening ends
     if(rp[1]>0&&rp[0]<maxR*1.1){
       ctx.strokeStyle=`rgba(74,240,122,${rp[1]/255})`;
       ctx.lineWidth=2;
@@ -357,6 +359,52 @@ function drawScanner(cxp,cyp,innerR,fade,dt60){
   }
   ctx.fillStyle=`rgba(235,255,245,${fade})`;
   ctx.beginPath();ctx.arc(hx,hy,4,0,6.29);ctx.fill();
+}
+
+/* ---------------- satellites (bio-radial) ----------------
+   One teal satellite per running background task, in ANY state; none
+   when nothing is running. A new one fades in; when a task finishes its
+   satellite flares outward and fades away. Count comes from AV.tasks
+   (the voice line's `.voice_tasks`; `?tasks=N` previews it). */
+const sats=[];
+const SAT_COL=[90,210,255];
+function drawSatellites(cxp,cyp,innerR,n,dt60){
+  const live=sats.filter(x=>!x.dying);
+  while(live.length<n){
+    const x={a:Math.random()*6.2832,rf:1.45+.12*(sats.length%3),
+             spd:(2*Math.PI/(60*(7+Math.random()*3))),fade:0,dying:false,flare:0};
+    sats.push(x);live.push(x);
+  }
+  while(live.length>n){const x=live.shift();x.dying=true;x.flare=1;}
+  for(let k=sats.length-1;k>=0;k--){
+    const x=sats[k];
+    x.a+=x.spd*dt60;
+    if(x.dying){x.fade-=.025*dt60;x.flare=Math.max(0,x.flare-.03*dt60);}
+    else x.fade=Math.min(1,x.fade+.03*dt60);
+    if(x.fade<=0&&x.dying){sats.splice(k,1);continue;}
+    const R=innerR*x.rf, f=Math.max(0,x.fade);
+    // trail
+    const span=Math.PI*.55, segs=30;
+    for(let i=0;i<segs;i++){
+      const t=i/(segs-1), a=x.a-span*(1-t), al=t*t*f*.7;
+      if(al<=0)continue;
+      ctx.fillStyle=`rgba(${SAT_COL[0]},${SAT_COL[1]},${SAT_COL[2]},${al})`;
+      ctx.beginPath();ctx.arc(cxp+Math.cos(a)*R,cyp+Math.sin(a)*R,Math.max(1,1+t*2.5),0,6.29);ctx.fill();
+    }
+    // head + glow
+    const hx=cxp+Math.cos(x.a)*R, hy=cyp+Math.sin(x.a)*R;
+    for(let i=4;i>0;i--){
+      ctx.fillStyle=`rgba(160,230,255,${f/(i+2)})`;
+      ctx.beginPath();ctx.arc(hx,hy,4+i*3,0,6.29);ctx.fill();
+    }
+    ctx.fillStyle=`rgba(225,248,255,${f})`;
+    ctx.beginPath();ctx.arc(hx,hy,4,0,6.29);ctx.fill();
+    // finish flare: an expanding ring where the satellite was
+    if(x.dying&&x.flare>0){
+      ctx.strokeStyle=`rgba(160,230,255,${x.flare*.8})`;ctx.lineWidth=2;
+      ctx.beginPath();ctx.arc(hx,hy,6+(1-x.flare)*40,0,6.29);ctx.stroke();
+    }
+  }
 }
 
 const constel=[];
@@ -437,9 +485,11 @@ const peakH=new Float32Array(NUM_BARS);
 const prevH=new Float32Array(NUM_BARS);
 const targets=new Float32Array(NUM_BARS);
 const memH=new Float32Array(NUM_BARS);   // neighbour-blended bar heights
-const MEM_BLUR=4;                        // bars blended on each side
-const MEM_GAIN=.8;                       // how far speech pushes the membrane out (was 1.15)
+const MEM_BLUR=2;                        // bars blended on each side
+const MEM_GAIN=.4;                       // how far speech pushes the membrane out (was 1.15)
 let memPhase=0;                          // slow organic wobble
+const SHOW_BREATH_HALO=false;             // the faint always-on glow around the orb
+const SHOW_VOICE_HALO=false;              // the stacked glow that swells while speaking
 function thicknessMem(){return Math.max(2,3*Math.min(W,H)/1200);}
 let pulseR=0;
 function colorFor(h){
@@ -525,16 +575,23 @@ function frame(dt){
   /* state-driven fades: speaking = both off (bars + halo own the motion),
      listening/thinking = working ornaments, idle = idle ornaments */
   const st=AV.state;
+  // AV.recording wins the OR: it's set the instant you press, client
+  // side, with no backend round trip to race against. The backend's
+  // own "listening" can lag a beat or flicker against a reply that's
+  // still genuinely speaking underneath a queued tap (signals.py's
+  // self-heal) — recording is the one signal that's never wrong.
+  const listening=st==="listening"||AV.recording;
   let idleT=0,workT=0;
-  if(st==="speaking"){idleT=0;workT=0}
-  else if(st==="listening"||st==="thinking"){idleT=0;workT=1}
+  if(listening){idleT=0;workT=0}                       // listening = sonar ripples (below)
+  else if(st==="speaking"){idleT=0;workT=0}
+  else if(st==="thinking"){idleT=0;workT=1}            // tick wheel + HUD arcs: thinking only
   else{idleT=1;workT=0}
   const ease=(cur,tg,up)=>cur+(tg-cur)*(tg>cur?up:.30)*dt60;
   idleFade=ease(idleFade,idleT,.08);
   workingFade=ease(workingFade,workT,.12);
-  if(idleT>.5)drawSonar(cxp,cyp,innerR,maxLen,dt60);
+  drawSonar(cxp,cyp,innerR,maxLen,dt60,listening);
 
-  drawRings(cxp,cyp,innerR,maxLen);
+  // (bio-radial: no frequency rings; while speaking, the membrane alone moves)
 
   /* orb energy: smart gate learns the ambient floor so quiet hum can
      never vibrate the orb; speech opens it with hysteresis */
@@ -558,8 +615,8 @@ function frame(dt){
   const baseSize=innerR*1.9|0;
   const orbSurf=orbRender(baseSize,orbEnergy,breath,dt);
 
-  // always-on breathing halo — faint, never off
-  {
+  // always-on breathing halo (bio-radial: off; set SHOW_BREATH_HALO to bring it back)
+  if(SHOW_BREATH_HALO){
     const a=(20+40*breath)/255;
     const r=baseSize*.55+breath*18;
     for(let i=5;i>0;i--){
@@ -567,8 +624,8 @@ function frame(dt){
       ctx.beginPath();ctx.arc(cxp,cyp,r+i*14,0,6.29);ctx.fill();
     }
   }
-  // audio halo — intensifies with the voice
-  if(imgEnergy>.02){
+  // audio halo, intensifies with the voice (bio-radial: off; reads as rings)
+  if(SHOW_VOICE_HALO&&imgEnergy>.02){
     const a=Math.min(.78,imgEnergy*1.57);
     const r=baseSize*.6+imgEnergy*60;
     for(let i=6;i>0;i--){
@@ -578,7 +635,8 @@ function frame(dt){
   }
 
   // idle-only movement: radar scanner + twinkling constellation
-  drawScanner(cxp,cyp,innerR,idleFade,dt60);
+  // satellites: one per running background task, any state
+  drawSatellites(cxp,cyp,innerR,AV.tasks||0,dt60);
   drawConstellation(cxp,cyp,innerR,idleFade,dt60);
   // working-state movement: data-tick wheel + HUD arcs
   drawTicks(cxp,cyp,innerR,workingFade,dt60);
@@ -644,7 +702,7 @@ function frame(dt){
   ctx.lineWidth=Math.max(1,thicknessMem()*.5);ctx.stroke();
 
   drawParticles(dt60);
-  drawPulse(cxp,cyp,innerR);
+  // (bio-radial: no pulse ring either)
 
   /* the orb in FRONT of everything starburst-related */
   {

@@ -151,15 +151,28 @@ const AV = (() => {
 
   /* ----------------------- envelope + samples easing ----------------------- */
   let peak = 0.05, sPeak = 200;
+  let lastWorking = false;   // see the button visibility note below
   function tick(dt) {
     if (DEMO) demoUpdate(dt);
     A.state = raw.state || "idle";
     // Not "listening": that's while YOU'RE recording, nothing of
     // Jarvis's own to interrupt yet, and the button popping in the
     // instant you press reads as noise, not a control.
+    //
+    // While recording, though, trust the LATCHED reading from the
+    // instant before you pressed, not the live one: a queued tap
+    // doesn't stop the backend's own turn, so its state can flicker
+    // against "listening" for the same reason the sonar fix below
+    // does (signals.py's self-heal racing _begin_capture's write).
+    // Live here would make the button flicker in and out of existence
+    // on top of a reply that's still genuinely in flight.
+    if (!A.recording)
+      lastWorking = A.state === "thinking" || A.state === "speaking";
     if (VI && VI.btn)
       VI.btn.style.display =
-        (A.state === "thinking" || A.state === "speaking" || VI.btnPressed)
+        ((A.recording ? lastWorking
+                       : A.state === "thinking" || A.state === "speaking")
+         || VI.btnPressed)
           ? "block" : "none";
     A.alert = !!raw.alert;
     // Running background tasks (satellites). ?tasks=N in the URL forces a
@@ -168,35 +181,46 @@ const AV = (() => {
     // Empty unless the voice line was told to publish usage. A face that
     // wants to draw it reads AV.rateLimits; every other face ignores it.
     A.rateLimits = raw.rate_limits || {};
-    A.level = raw.level || 0;
 
-    // adaptive envelope: normalize against a decaying peak, then ease
-    // (attack 50ms, release 350ms) — motion code rides AV.env
-    const dts = dt / 1000;
-    peak = Math.max(A.level, 0.05, peak - 0.5 * peak * dts);
-    const target = Math.min(1, A.level / peak);
-    const tau = target > A.env ? 50 : 350;
-    A.env += (target - A.env) * Math.min(1, dt / tau);
+    // Gate on A.recording, not the backend state: a queued tap doesn't
+    // stop the backend's own turn (it's still genuinely speaking, state
+    // and all, see signals.py's self-heal), so riding A.state here would
+    // just inherit that race as visible flicker. A.recording is set
+    // synchronously client-side the instant you press, with nothing to
+    // race against, and it's what actually answers "should the reply
+    // visuals hold still right now" — the playback clock is frozen for
+    // exactly the same span (see viPress).
+    if (!A.recording) {
+      A.level = raw.level || 0;
 
-    // waveform ring: rectify, normalize against its own decaying peak,
-    // blend toward the newest frame so the ring flows instead of flickers
-    const s = raw.samples;
-    A.rawSamples = s && s.length ? s : null;   // signed, int16-scale floats
-    if (s && s.length) {
-      let mx = 0;
-      for (let i = 0; i < s.length; i++) mx = Math.max(mx, Math.abs(s[i]));
-      sPeak = Math.max(mx, 200, sPeak * 0.98);
-      const n = s.length;
-      for (let i = 0; i < 64; i++) {
-        const v = Math.abs(s[Math.min(n - 1, Math.round(i * (n - 1) / 63))])
-          / sPeak;
-        A.samples[i] = A.samples[i] * 0.45 + Math.min(1, v) * 0.55;
+      // adaptive envelope: normalize against a decaying peak, then ease
+      // (attack 50ms, release 350ms) — motion code rides AV.env
+      const dts = dt / 1000;
+      peak = Math.max(A.level, 0.05, peak - 0.5 * peak * dts);
+      const target = Math.min(1, A.level / peak);
+      const tau = target > A.env ? 50 : 350;
+      A.env += (target - A.env) * Math.min(1, dt / tau);
+
+      // waveform ring: rectify, normalize against its own decaying peak,
+      // blend toward the newest frame so the ring flows instead of flickers
+      const s = raw.samples;
+      A.rawSamples = s && s.length ? s : null;   // signed, int16-scale floats
+      if (s && s.length) {
+        let mx = 0;
+        for (let i = 0; i < s.length; i++) mx = Math.max(mx, Math.abs(s[i]));
+        sPeak = Math.max(mx, 200, sPeak * 0.98);
+        const n = s.length;
+        for (let i = 0; i < 64; i++) {
+          const v = Math.abs(s[Math.min(n - 1, Math.round(i * (n - 1) / 63))])
+            / sPeak;
+          A.samples[i] = A.samples[i] * 0.45 + Math.min(1, v) * 0.55;
+        }
+      } else {
+        for (let i = 0; i < 64; i++) A.samples[i] *= Math.max(0, 1 - dts * 6);
       }
-    } else {
-      for (let i = 0; i < 64; i++) A.samples[i] *= Math.max(0, 1 - dts * 6);
+      if (A.state !== "speaking" && !DEMO)
+        for (let i = 0; i < 64; i++) A.samples[i] *= Math.max(0, 1 - dts * 6);
     }
-    if (A.state !== "speaking" && !DEMO)
-      for (let i = 0; i < 64; i++) A.samples[i] *= Math.max(0, 1 - dts * 6);
 
     if (A._mic && A._micAnalyser) micRead();
     soundUpdate();

@@ -193,8 +193,17 @@ def read_bus():
         rate_limits = json.loads((BUS / ".voice_rate_limits").read_text())
     except (OSError, ValueError):
         pass
+    # How many of the agent's background tasks are still running (the
+    # faces draw one satellite per task). Written by the voice line as
+    # `.voice_tasks` holding a plain integer; absent or unreadable = 0.
+    tasks = 0
+    try:
+        tasks = max(0, int((BUS / ".voice_tasks").read_text().strip() or 0))
+    except (OSError, ValueError):
+        pass
     return {"state": state, "level": level, "samples": samples,
-            "alert": alert, "loading": loading, "rate_limits": rate_limits}
+            "alert": alert, "loading": loading, "rate_limits": rate_limits,
+            "tasks": tasks}
 
 
 class Handler(BaseHTTPRequestHandler):
