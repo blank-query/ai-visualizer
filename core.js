@@ -360,8 +360,10 @@ const AV = (() => {
     const ctx = viPlayCtx();
     // A tab the browser paused (screen locked, backgrounded, reconnected
     // without a tap) would play every reply into silence. Allowed
-    // without a fresh gesture once the page has had one.
-    if (ctx.state !== "running") ctx.resume().catch(() => {});
+    // without a fresh gesture once the page has had one. Never during a
+    // queued press, though: that pause is deliberate, and the release
+    // resumes it, with everything that arrived meanwhile still queued.
+    if (ctx.state !== "running" && !VI.pausedForQueue) ctx.resume().catch(() => {});
     const abuf = ctx.createBuffer(1, i16.length, rate);
     const chan = abuf.getChannelData(0);
     for (let i = 0; i < i16.length; i++) chan[i] = i16[i] / 32768;
