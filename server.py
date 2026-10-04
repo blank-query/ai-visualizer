@@ -201,9 +201,18 @@ def read_bus():
         tasks = max(0, int((BUS / ".voice_tasks").read_text().strip() or 0))
     except (OSError, ValueError):
         pass
+    # Which browser connection the CURRENT turn's reply is going to, if
+    # a specific one asked for it; "" means everyone (nobody specific
+    # asked, or no turn in flight). Written by the voice line as
+    # `.voice_active_conn`; absent or unreadable = "" (everyone).
+    active_conn = ""
+    try:
+        active_conn = (BUS / ".voice_active_conn").read_text().strip()
+    except OSError:
+        pass
     return {"state": state, "level": level, "samples": samples,
             "alert": alert, "loading": loading, "rate_limits": rate_limits,
-            "tasks": tasks}
+            "tasks": tasks, "active_conn": active_conn}
 
 
 class Handler(BaseHTTPRequestHandler):

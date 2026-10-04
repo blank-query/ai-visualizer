@@ -155,6 +155,23 @@ const AV = (() => {
   function tick(dt) {
     if (DEMO) demoUpdate(dt);
     A.state = raw.state || "idle";
+    // Per-device animation: a turn with a specific asker only animates
+    // on that connection (mirrors the audio, which already only plays
+    // there); "" means everyone (nobody specific asked, or nothing's
+    // in flight). A face still gets to know Jarvis is busy SOMEWHERE
+    // via A.busyElsewhere, so a tab that isn't the one talking doesn't
+    // have to look flatly idle while he's genuinely working elsewhere.
+    // Resolved BEFORE the button-visibility check below, on purpose:
+    // that check used to read the pre-gate A.state, so the Interrupt
+    // button showed on every tab during someone else's turn too, and a
+    // tab that isn't part of a turn has nothing of its own to
+    // interrupt.
+    A.activeConn = raw.active_conn || "";
+    const forThisTab = !A.activeConn || !VI || VI.connId == null
+      || String(A.activeConn) === String(VI.connId);
+    A.busyElsewhere = !forThisTab
+      && (raw.state === "thinking" || raw.state === "speaking");
+    if (!forThisTab) A.state = "idle";
     // Not "listening": that's while YOU'RE recording, nothing of
     // Jarvis's own to interrupt yet, and the button popping in the
     // instant you press reads as noise, not a control.
@@ -191,7 +208,12 @@ const AV = (() => {
     // visuals hold still right now" — the playback clock is frozen for
     // exactly the same span (see viPress).
     if (!A.recording) {
-      A.level = raw.level || 0;
+      // Same per-device gate as A.state above: a turn that isn't for
+      // this tab must look silent here too, not just report "idle",
+      // otherwise the envelope and waveform ring keep tracking the
+      // OTHER tab's real audio regardless, and the blob still visibly
+      // pulses in lockstep with a reply this tab never asked for.
+      A.level = forThisTab ? (raw.level || 0) : 0;
 
       // adaptive envelope: normalize against a decaying peak, then ease
       // (attack 50ms, release 350ms) — motion code rides AV.env
@@ -203,7 +225,7 @@ const AV = (() => {
 
       // waveform ring: rectify, normalize against its own decaying peak,
       // blend toward the newest frame so the ring flows instead of flickers
-      const s = raw.samples;
+      const s = forThisTab ? raw.samples : null;
       A.rawSamples = s && s.length ? s : null;   // signed, int16-scale floats
       if (s && s.length) {
         let mx = 0;
@@ -238,9 +260,16 @@ const AV = (() => {
     micPeak = Math.max(rms, 0.02, micPeak * 0.999);
     A.micLevel = Math.min(1, rms / micPeak);
   }
+  // Raw mic: the browser's default voice processing (echo cancellation,
+  // noise suppression, auto gain) gated the speech into dropouts, worst
+  // with other tabs or speakers playing audio (saved clips measured 43-52%
+  // near-silence inside speech). Push-to-talk already pauses Jarvis's own
+  // playback while recording, so echo cancellation buys nothing here.
+  // (Live intercom will want it back, on its own stream.)
+  const MIC_RAW = { audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } };
   async function micStart() {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia(MIC_RAW);
       const ctx = new AudioContext();
       const src = ctx.createMediaStreamSource(stream);
       const an = ctx.createAnalyser();
@@ -270,17 +299,34 @@ const AV = (() => {
      working) is the sole way to actually stop a reply: it sends
      interrupt_press instead of press, and a "stop" control frame back
      from the server clears whatever audio is already scheduled here. */
+  // This tab's own identity for per-device audio/animation routing
+  // (compared against AV.activeConn). Generated once and kept in
+  // sessionStorage so it survives reloads and reconnects (a server-
+  // assigned id resets on every reconnect, silently reassigning the
+  // tab mid-session). Not localStorage: that's shared by every tab of
+  // the same origin, so two tabs would read the SAME id and collide.
+  // Caveat: browsers copy sessionStorage into a DUPLICATED tab, so a
+  // duplicate shares its original's id; open a fresh tab instead.
+  const DEVICE_ID = (() => {
+    try {
+      let id = sessionStorage.getItem("av_device_id");
+      if (!id) { id = crypto.randomUUID(); sessionStorage.setItem("av_device_id", id); }
+      return id;
+    } catch (e) { return crypto.randomUUID(); }
+  })();
   let VI = null;   // { ws, capCtx, proc, mute, playCtx, nextPlayTime, sources, btn }
   function viConnect() {
     if (VI && VI.ws && VI.ws.readyState <= 1) return;
     try {
       const ws = new WebSocket(A.backendWs);
       ws.binaryType = "arraybuffer";
+      ws.onopen = () => ws.send(JSON.stringify({ type: "hello", device_id: DEVICE_ID }));
       ws.onmessage = viOnMessage;
       ws.onclose = () => setTimeout(viConnect, 1500);
       ws.onerror = () => {};
       VI = VI || {};
       VI.ws = ws;
+      VI.connId = DEVICE_ID;
     } catch (e) { /* bad backend_ws URL: voice input just stays off */ }
   }
   function viPlayCtx() {
@@ -327,8 +373,9 @@ const AV = (() => {
   async function viEnsureCapture() {
     if (VI.proc) return true;
     try {
+      const ownStream = !A._micStream;
       const stream = A._micStream
-        || await navigator.mediaDevices.getUserMedia({ audio: true });
+        || await navigator.mediaDevices.getUserMedia(MIC_RAW);
       const ctx = new AudioContext({ sampleRate: 16000 });
       const src = ctx.createMediaStreamSource(stream);
       // deprecated but universal; AudioWorkletNode is the future upgrade
@@ -354,8 +401,21 @@ const AV = (() => {
       proc.connect(mute);
       mute.connect(ctx.destination);
       VI.capCtx = ctx; VI.proc = proc; VI.mute = mute;
+      VI.capStream = ownStream ? stream : null;
       return true;
     } catch (e) { return false; }
+  }
+  // Hold the mic ONLY while pressed. A tab that kept its capture open
+  // after its first press held the mic forever, and with two tabs holding
+  // it the recording dropped out constantly (gone the moment the second
+  // tab closed). Released on every key-up; reopened on the next press.
+  function viReleaseCapture() {
+    if (!VI || !VI.proc) return;
+    try { VI.proc.onaudioprocess = null; VI.proc.disconnect(); } catch (e) {}
+    try { VI.mute.disconnect(); } catch (e) {}
+    try { VI.capCtx.close(); } catch (e) {}
+    if (VI.capStream) VI.capStream.getTracks().forEach(t => t.stop());
+    VI.proc = VI.capCtx = VI.mute = VI.capStream = null;
   }
   function viPress(isInterrupt) {
     if (!VI || !VI.ws || VI.ws.readyState !== 1) return;
@@ -366,23 +426,44 @@ const AV = (() => {
     // pipeline runs without error, and no sound ever comes out.
     const pctx = viPlayCtx();
     if (pctx.state === "suspended") pctx.resume().catch(() => {});
+    if (isInterrupt) {
+      // The Interrupt button must land as fast as a key press: stop
+      // the reply FIRST, never gated on mic capture (which can take a
+      // moment on first use, or fail outright). A quick tap-release
+      // with nothing recorded still stops Jarvis; it just never sends
+      // a question behind it.
+      VI.pressActive = true;
+      VI.ws.send(JSON.stringify({ type: "interrupt_press" }));
+    }
+    VI.held = true;   // the finger is down; cleared on release
     viEnsureCapture().then(ok => {
       if (!ok || !VI || !VI.ws || VI.ws.readyState !== 1) return;
+      // Released before the mic finished opening (a quick tap): drop the
+      // mic again rather than start a recording nobody will ever release.
+      if (!VI.held) { viReleaseCapture(); return; }
       A.recording = true;
+      if (isInterrupt) return;
+      VI.pressActive = true;
       // A queued tap (not the Interrupt button) pauses playback rather
       // than touching it: the AudioContext clock freezes, so whatever
       // was scheduled just picks back up exactly where it left off on
       // release, nothing lost, nothing restarted.
-      if (!isInterrupt && VI.playCtx && VI.playCtx.state === "running") {
+      if (VI.playCtx && VI.playCtx.state === "running") {
         VI.playCtx.suspend().catch(() => {});
         VI.pausedForQueue = true;
       }
-      VI.ws.send(JSON.stringify(
-        { type: isInterrupt ? "interrupt_press" : "press" }));
+      VI.ws.send(JSON.stringify({ type: "press" }));
     });
   }
   function viRelease() {
-    if (!VI || !A.recording) return;
+    if (VI) VI.held = false;
+    // Gated on pressActive, not A.recording: an Interrupt tap sends
+    // its control message immediately, before capture even resolves,
+    // so a release arriving before that promise settles still has to
+    // reach the server; waiting on A.recording would strand it there
+    // mid-press instead.
+    if (!VI || !VI.pressActive) return;
+    VI.pressActive = false;
     A.recording = false;
     if (VI.pausedForQueue) {
       VI.pausedForQueue = false;
@@ -390,6 +471,7 @@ const AV = (() => {
     }
     if (VI.ws && VI.ws.readyState === 1)
       VI.ws.send(JSON.stringify({ type: "release" }));
+    viReleaseCapture();
   }
   function viInit() {
     viConnect();
@@ -415,7 +497,17 @@ const AV = (() => {
       cursorShow();
     }
     stage.style.touchAction = "none";
-    stage.addEventListener("pointerdown", (e) => { e.preventDefault(); viPress(false); });
+    stage.addEventListener("pointerdown", (e) => {
+      // A face may narrow this to its own visible shape (e.g. the
+      // bioradial swarm) by setting A.hitCenterX/Y and A.hitRadius
+      // each frame; a face that never sets them keeps today's
+      // whole-stage behavior.
+      if (A.hitRadius != null) {
+        const dx = e.clientX - A.hitCenterX, dy = e.clientY - A.hitCenterY;
+        if (dx * dx + dy * dy > A.hitRadius * A.hitRadius) return;
+      }
+      e.preventDefault(); viPress(false);
+    });
     ["pointerup", "pointercancel", "pointerleave"].forEach(evt =>
       stage.addEventListener(evt, () => viRelease()));
 

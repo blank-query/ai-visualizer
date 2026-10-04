@@ -570,22 +570,35 @@ function frame(dt){
   const cxp=W>>1, cyp=H>>1;
   const innerR=Math.min(cxp,cyp)*.42;
   const maxLen=Math.min(cxp,cyp)*.65;
+  // Tap-to-talk should only fire on the orb itself, not the empty
+  // margins of a full-screen canvas; core.js reads these three and
+  // falls back to "the whole stage" when a face doesn't set them.
+  // innerR matches the orb's own rendered edge (the tick ring sits at
+  // baseSize*.5, and baseSize is innerR*1.9, the same circle, not the
+  // wider field the satellites orbit in).
+  AV.hitCenterX=cxp; AV.hitCenterY=cyp; AV.hitRadius=innerR;
   rotation+=.002*dt60;
 
   /* state-driven fades: speaking = both off (bars + halo own the motion),
      listening/thinking = working ornaments, idle = idle ornaments */
   const st=AV.state;
-  // AV.recording wins the OR: it's set the instant you press, client
-  // side, with no backend round trip to race against. The backend's
-  // own "listening" can lag a beat or flicker against a reply that's
-  // still genuinely speaking underneath a queued tap (signals.py's
-  // self-heal) — recording is the one signal that's never wrong.
-  const listening=st==="listening"||AV.recording;
+  // AV.recording ALONE, not the backend state: listening/recording is
+  // inherently per-device (only the tab actually being held down is
+  // listening), where the backend's `.voice_state` is one global
+  // value every tab polls, so riding it here would show every tab's
+  // sonar the instant ANY of them starts recording. AV.recording is
+  // set the instant THIS tab is pressed, client side, true nowhere
+  // else.
+  const listening=AV.recording;
   let idleT=0,workT=0;
   if(listening){idleT=0;workT=0}                       // listening = sonar ripples (below)
   else if(st==="speaking"){idleT=0;workT=0}
   else if(st==="thinking"){idleT=0;workT=1}            // tick wheel + HUD arcs: thinking only
   else{idleT=1;workT=0}
+  // Not this tab's turn, but Jarvis is genuinely busy on another
+  // device: a faint trickle of the working ornaments instead of
+  // flatly idle, short of this tab's own "thinking" look.
+  if(AV.busyElsewhere)workT=Math.max(workT,.25);
   const ease=(cur,tg,up)=>cur+(tg-cur)*(tg>cur?up:.30)*dt60;
   idleFade=ease(idleFade,idleT,.08);
   workingFade=ease(workingFade,workT,.12);
