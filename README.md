@@ -4,7 +4,7 @@
 
 This is a fork of [jaredrhod/ai-visualizer](https://github.com/jaredrhod/ai-visualizer). Everything below this section is the original README, and nearly all of the work is his. The `remote` branch makes the face the way you talk to the agent from any browser:
 
-- **Tap-to-talk:** press and hold the orb to record a question in the browser, release to send, and the reply plays in the same tab, through the browser bridge in [this backtalk fork](https://github.com/blank-query/backtalk) (`backend_ws` in `ai-visualizer.json`). An Interrupt button appears while the agent is working.
+- **Tap-to-talk:** press and hold the orb to record a question in the browser, release to send, and the reply plays in the same tab, through the browser bridge in [this backtalk fork](https://github.com/blank-query/network-backtalk) (`backend_ws` in `ai-visualizer.json`). An Interrupt button appears while the agent is working.
 - **Reachable over the network:** the bind address is configurable (`host`, loopback-only by default). Put an HTTPS reverse proxy in front, since browsers only allow the mic over HTTPS.
 - **Per-tab animation:** with several tabs or devices connected, each animates only its own turns, with a dim "busy elsewhere" hint while another one is being answered.
 - **A new face, Bio-Radial:** a rounder, organic take on Radial, with satellites marking running background tasks.
