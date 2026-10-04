@@ -10,6 +10,12 @@ This is a fork of [jaredrhod/ai-visualizer](https://github.com/jaredrhod/ai-visu
 - **A new face, Bio-Radial:** a rounder, organic take on Radial, with satellites marking running background tasks.
 - **Mic fixes:** the browser's own voice processing is off (it chopped speech into dropouts), and the mic is held only while pressed.
 
+---
+
+**End of this fork's notes. Everything below is the original README by [jaredrhod](https://github.com/jaredrhod), unchanged.**
+
+---
+
 > **Never used Claude Code?** Start at [jaredrhod.com](https://jaredrhod.com): pick your situation and it routes you to the right path.
 
 **Runs on:** Python 3 and a browser; works with any AI. Pair it with backtalk (Claude Code) for the live show; demo mode works standalone.
