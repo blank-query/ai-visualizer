@@ -404,12 +404,13 @@ const AV = (() => {
       const proc = ctx.createScriptProcessor(4096, 1, 1);
       proc.onaudioprocess = (e) => {
         if (!(A.recording || VI.hf) || !VI.ws || VI.ws.readyState !== 1) return;
-        // Hands-free goes deaf while this tab plays Jarvis (plus a short
-        // tail): echo cancellation did NOT remove this page's own Web
-        // Audio playback (Brave on Linux, 2026-10-04), so the open mic
-        // heard the reply and it interrupted itself.
-        if (!A.recording && VI.playCtx
-            && VI.nextPlayTime > VI.playCtx.currentTime - 0.3) return;
+        // Hands-free goes deaf while this tab plays anything of its own:
+        // the reply (plus a short tail) and the thinking sound. This is
+        // the ONLY hands-free gate; the voice line doesn't care whose
+        // turn it is. The open mic heard both and Whisper turned them
+        // into words ("1, 2, 3... 9, 9, 9" from the thinking sound).
+        if (!A.recording && ((audio && !audio.paused) || (VI.playCtx
+            && VI.nextPlayTime > VI.playCtx.currentTime - 0.3))) return;
         const input = e.inputBuffer.getChannelData(0);
         const i16 = new Int16Array(input.length);
         for (let i = 0; i < input.length; i++) {
