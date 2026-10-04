@@ -85,6 +85,7 @@ const AV = (() => {
     if (cfg.thinking_sound === false) A._sndWant = false;
     A.faces = cfg.faces || [];
     A.backendWs = String(cfg.backend_ws || "");
+    A.modeHues = cfg.mode_hues || {};
     if (A.backendWs && !DEMO) viInit();
     A._ready = true;
     A._readyCbs.forEach(cb => cb(A));
@@ -267,6 +268,10 @@ const AV = (() => {
   // playback while recording, so echo cancellation buys nothing here.
   // (Live intercom will want it back, on its own stream.)
   const MIC_RAW = { audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } };
+  // Hands-free is that live stream: the voice line's "listen" frame
+  // turns it on, and echo cancellation keeps Jarvis's own voice and
+  // thinking sound out of the open mic.
+  const MIC_HF = { audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } };
   async function micStart() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia(MIC_RAW);
@@ -338,6 +343,11 @@ const AV = (() => {
       try {
         const msg = JSON.parse(ev.data);
         if (msg.type === "stop") viStopPlayback();
+        else if (msg.type === "listen") {
+          VI.hfMuted = !!msg.muted;
+          viListen(!!msg.on);
+          viPaintMode(msg.on ? (msg.muted ? "paused" : "listening") : "ptt");
+        }
       } catch (e) { /* ignore */ }
       return;
     }
@@ -373,15 +383,27 @@ const AV = (() => {
   async function viEnsureCapture() {
     if (VI.proc) return true;
     try {
-      const ownStream = !A._micStream;
-      const stream = A._micStream
-        || await navigator.mediaDevices.getUserMedia(MIC_RAW);
+      const ownStream = VI.hf || !A._micStream;
+      const stream = (!VI.hf && A._micStream)
+        || await navigator.mediaDevices.getUserMedia(VI.hf ? MIC_HF : MIC_RAW);
       const ctx = new AudioContext({ sampleRate: 16000 });
+      // Hands-free can start with no gesture on this page (a reload
+      // that comes back listening): resume on the first one.
+      if (ctx.state === "suspended") {
+        ctx.resume().catch(() => {});
+        addEventListener("pointerdown", () => ctx.resume().catch(() => {}), { once: true });
+      }
       const src = ctx.createMediaStreamSource(stream);
       // deprecated but universal; AudioWorkletNode is the future upgrade
       const proc = ctx.createScriptProcessor(4096, 1, 1);
       proc.onaudioprocess = (e) => {
-        if (!A.recording || !VI.ws || VI.ws.readyState !== 1) return;
+        if (!(A.recording || VI.hf) || !VI.ws || VI.ws.readyState !== 1) return;
+        // Hands-free goes deaf while this tab plays Jarvis (plus a short
+        // tail): echo cancellation did NOT remove this page's own Web
+        // Audio playback (Brave on Linux, 2026-10-04), so the open mic
+        // heard the reply and it interrupted itself.
+        if (!A.recording && VI.playCtx
+            && VI.nextPlayTime > VI.playCtx.currentTime - 0.3) return;
         const input = e.inputBuffer.getChannelData(0);
         const i16 = new Int16Array(input.length);
         for (let i = 0; i < input.length; i++) {
@@ -410,12 +432,24 @@ const AV = (() => {
   // it the recording dropped out constantly (gone the moment the second
   // tab closed). Released on every key-up; reopened on the next press.
   function viReleaseCapture() {
-    if (!VI || !VI.proc) return;
+    if (!VI || !VI.proc || VI.hf) return;   // hands-free keeps it
     try { VI.proc.onaudioprocess = null; VI.proc.disconnect(); } catch (e) {}
     try { VI.mute.disconnect(); } catch (e) {}
     try { VI.capCtx.close(); } catch (e) {}
     if (VI.capStream) VI.capStream.getTracks().forEach(t => t.stop());
     VI.proc = VI.capCtx = VI.mute = VI.capStream = null;
+  }
+  function viPaintMode(mode) {
+    const stage = document.getElementById("stage");
+    const deg = Number(A.modeHues[mode]) || 0;
+    if (stage) stage.style.filter = deg ? `hue-rotate(${deg}deg)` : "";
+  }
+  async function viListen(on) {
+    if (on === !!VI.hf) return;
+    if (!on) { VI.hf = false; if (!A.recording) viReleaseCapture(); return; }
+    viReleaseCapture();   // a raw push-to-talk capture, if one is open
+    VI.hf = true;
+    if (!(await viEnsureCapture())) VI.hf = false;
   }
   function viPress(isInterrupt) {
     if (!VI || !VI.ws || VI.ws.readyState !== 1) return;
@@ -456,22 +490,33 @@ const AV = (() => {
     });
   }
   function viRelease() {
+    const wasHeld = !!(VI && VI.held);
     if (VI) VI.held = false;
-    // Gated on pressActive, not A.recording: an Interrupt tap sends
-    // its control message immediately, before capture even resolves,
-    // so a release arriving before that promise settles still has to
-    // reach the server; waiting on A.recording would strand it there
-    // mid-press instead.
-    if (!VI || !VI.pressActive) return;
-    VI.pressActive = false;
-    A.recording = false;
-    if (VI.pausedForQueue) {
-      VI.pausedForQueue = false;
-      if (VI.playCtx) VI.playCtx.resume().catch(() => {});
+    // After "stop listening", ANY click on the orb brings hands-free
+    // back, even a tap too quick to open the mic. Sent on release, so
+    // a held press is still an ordinary push-to-talk turn first; and
+    // only after a real press (pointerleave also lands here).
+    const unmute = wasHeld && VI.hfMuted && VI.ws && VI.ws.readyState === 1;
+    if (unmute) VI.hfMuted = false;
+    try {
+      // Gated on pressActive, not A.recording: an Interrupt tap sends
+      // its control message immediately, before capture even resolves,
+      // so a release arriving before that promise settles still has to
+      // reach the server; waiting on A.recording would strand it there
+      // mid-press instead.
+      if (!VI || !VI.pressActive) return;
+      VI.pressActive = false;
+      A.recording = false;
+      if (VI.pausedForQueue) {
+        VI.pausedForQueue = false;
+        if (VI.playCtx) VI.playCtx.resume().catch(() => {});
+      }
+      if (VI.ws && VI.ws.readyState === 1)
+        VI.ws.send(JSON.stringify({ type: "release" }));
+      viReleaseCapture();
+    } finally {
+      if (unmute) VI.ws.send(JSON.stringify({ type: "unmute" }));
     }
-    if (VI.ws && VI.ws.readyState === 1)
-      VI.ws.send(JSON.stringify({ type: "release" }));
-    viReleaseCapture();
   }
   function viInit() {
     viConnect();

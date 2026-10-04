@@ -85,6 +85,10 @@ DEFAULTS = {
     "backend_ws": "",       # backtalk's browser bridge, e.g.
                             # "ws://127.0.0.1:8792" — tap/click-to-talk on
                             # the face. "" leaves it off (default).
+    # Hue shift (degrees, CSS hue-rotate) on the face per mic mode, so
+    # the mode reads at a glance: push-to-talk, hands-free listening,
+    # and paused (waiting for "start listening").
+    "mode_hues": {"ptt": 0, "listening": 120, "paused": -110},
 }
 
 
@@ -227,6 +231,7 @@ class Handler(BaseHTTPRequestHandler):
                        "face": CFG["face"],
                        "thinking_sound": bool(CFG["thinking_sound"]),
                        "backend_ws": CFG.get("backend_ws", ""),
+                       "mode_hues": CFG.get("mode_hues", {}),
                        "faces": list_faces()}
                 self._send(json.dumps(out).encode(), "application/json")
             else:
