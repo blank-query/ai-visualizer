@@ -268,10 +268,12 @@ const AV = (() => {
   // playback while recording, so echo cancellation buys nothing here.
   // (Live intercom will want it back, on its own stream.)
   const MIC_RAW = { audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } };
-  // Hands-free is that live stream: the voice line's "listen" frame
-  // turns it on, and echo cancellation keeps Jarvis's own voice and
-  // thinking sound out of the open mic.
-  const MIC_HF = { audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } };
+  // Hands-free is a live stream of that same raw mic (the voice line's
+  // "listen" frame turns it on). Echo cancellation was tried and
+  // dropped: it didn't keep this page's own playback out of the mic
+  // (the tab goes deaf while playing instead, see the capture), and on
+  // the Pi the processed audio transcribed noticeably worse.
+  const MIC_HF = MIC_RAW;
   async function micStart() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia(MIC_RAW);
@@ -356,6 +358,10 @@ const AV = (() => {
     const rate = new DataView(buf).getUint32(0, true);
     const i16 = new Int16Array(buf.slice(4));
     const ctx = viPlayCtx();
+    // A tab the browser paused (screen locked, backgrounded, reconnected
+    // without a tap) would play every reply into silence. Allowed
+    // without a fresh gesture once the page has had one.
+    if (ctx.state !== "running") ctx.resume().catch(() => {});
     const abuf = ctx.createBuffer(1, i16.length, rate);
     const chan = abuf.getChannelData(0);
     for (let i = 0; i < i16.length; i++) chan[i] = i16[i] / 32768;
