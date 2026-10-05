@@ -59,6 +59,11 @@ const AV = (() => {
   const SHOT = Q.get("shot");
   const SHOT_T = parseInt(Q.get("t") || "4000", 10);
   const DEMO = Q.get("demo") === "1" || location.protocol === "file:" || !!SHOT;
+  // ?display=1&device=<id>: embedded in a native app that does its own
+  // audio. Draw only: no socket, no mic, no thinking sound (the app's
+  // open mic would hear it); animate for that device's turns; the app
+  // sets the mode color through AV.setMode(ptt|listening|paused).
+  const DISPLAY = Q.get("display") === "1";
 
   // where core.js lives -> where assets/ lives (works over http and file://)
   const ROOT = new URL(".", document.currentScript.src);
@@ -86,7 +91,9 @@ const AV = (() => {
     A.faces = cfg.faces || [];
     A.backendWs = String(cfg.backend_ws || "");
     A.modeHues = cfg.mode_hues || {};
-    if (A.backendWs && !DEMO) viInit();
+    A.setMode = (m) => viPaintMode(m);
+    if (DISPLAY) { A._sndWant = false; VI = { connId: Q.get("device") || null }; }
+    else if (A.backendWs && !DEMO) viInit();
     A._ready = true;
     A._readyCbs.forEach(cb => cb(A));
     A._readyCbs = [];
