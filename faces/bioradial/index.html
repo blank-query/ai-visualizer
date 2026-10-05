@@ -563,7 +563,7 @@ function drawAlert(cxp,cyp,innerR,dt60){
 }
 
 /* ---------------- state fades + orb gate ---------------- */
-let rotation=0, idleFade=0, workingFade=0, breathPhase=0;
+let rotation=0, idleFade=0, workingFade=0, breathPhase=0, room=null;
 let imgEnergy=0, orbEnergy=0, noiseFloor=.05, gateOpen=false, gateT0=null;
 let orbFont=null;
 
@@ -585,7 +585,9 @@ function frame(dt){
 
   // With the terminal along the bottom (core.js), the orb centers in the
   // space above where its text fades in (half its height).
-  const room=AV.termShown?Math.min(H,AV.termTop+(H-AV.termTop)*.5):H;
+  // Eased, so the orb glides up as the terminal opens and back as it closes.
+  const roomT=AV.termShown?Math.min(H,AV.termTop+(H-AV.termTop)*.5):H;
+  room=room==null?roomT:room+(roomT-room)*Math.min(1,.12*dt60);
   const cxp=W>>1, cyp=room>>1;
   const innerR=Math.min(cxp,cyp)*.42*SIZE;
   const maxLen=Math.min(cxp,cyp)*.65;

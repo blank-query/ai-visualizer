@@ -200,6 +200,13 @@ const AV = (() => {
                        : A.state === "thinking" || A.state === "speaking")
          || VI.btnPressed)
           ? "block" : "none";
+    // With the terminal open, the pill sits centered in the gap between
+    // the orb and where the terminal's text becomes visible.
+    if (VI && VI.btn) {
+      const gap = A.termGap();
+      VI.btn.style.top = gap ? (gap - VI.btn.offsetHeight / 2) + "px" : "";
+      VI.btn.style.bottom = gap ? "auto" : "";
+    }
     A.alert = !!raw.alert;
     // Running background tasks (satellites). ?tasks=N in the URL forces a
     // count, to preview the look before the voice line publishes one.
@@ -625,7 +632,15 @@ const AV = (() => {
       return true;
     };
     ["pointercancel", "pointerleave"].forEach(evt => stage.addEventListener(evt, endMute));
+    let swipeY0 = null;
+    stage.addEventListener("pointerdown", (e) => { swipeY0 = e.clientY; }, true);
+    stage.addEventListener("pointermove", (e) => {
+      // a drag is a swipe, never a hold-to-pause
+      if (swipeY0 != null && Math.abs(e.clientY - swipeY0) > 30) clearTimeout(muteT);
+    });
     stage.addEventListener("pointerup", (e) => {
+      const y0 = swipeY0; swipeY0 = null;
+      if (y0 != null && !muteHeld && A.termSwipe(y0, e.clientY)) { tapDownAt = 0; return; }
       if (endMute()) { tapDownAt = 0; return; }
       if (!tapDownAt || e.timeStamp - tapDownAt > 300) { tapDownAt = 0; return; }
       tapDownAt = 0; taps++;
@@ -677,18 +692,34 @@ const AV = (() => {
 
   /* -------------------------------- terminal ------------------------------- */
   // The conversation as text along the bottom, fading out toward the top,
-  // scrollable, with a box to type to the agent. Shown only where the
-  // screen is at least 600 CSS px tall in its current orientation (phones
-  // upright, the Fold's inner screen either way, desktops; not the Echo
-  // Show or a phone on its side). Uses the screen, not the window, so a
-  // phone keyboard opening doesn't hide it mid-typing. Lines arrive as
-  // "line" frames for this device's turns. Embedded in the app (display
-  // mode) the app owns the socket: it calls AV.termLine(who, text) /
-  // AV.termLines([...]), and typed text goes to window.JarvisApp.send.
-  // A.termTop is where it starts (CSS px from the top; the window's height
-  // when hidden), for a face to fit its orb above it.
-  let term = null;
+  // scrollable, with a box to type to the agent. Hidden until you swipe
+  // up from the blank space below the orb (AV.termShow(true)); a swipe
+  // down from above the orb hides it again. Only where the screen is at
+  // least 600 CSS px tall in its current orientation (phones upright, the
+  // Fold's inner screen either way, desktops; not the Echo Show or a phone
+  // on its side). Uses the screen, not the window, so a phone keyboard
+  // opening doesn't hide it mid-typing. Lines arrive as "line" frames for
+  // this device's turns. Embedded in the app (display mode) the app owns
+  // the socket and the touches: it calls AV.termLine(who, text) /
+  // AV.termLines([...]) / AV.termShow(on), and typed text goes to
+  // window.JarvisApp.send. A.termTop is where it starts (CSS px from the
+  // top; the window's height when hidden), for a face to fit its orb above.
+  let term = null, termOpen = false, termFit = () => {};
   A.termTop = innerHeight;
+  A.termShow = (on) => { termOpen = !!on; termFit(); };
+  // The middle of the gap between the orb and the terminal's visible text
+  // (CSS px from the top), or 0 when it's hidden; the Interrupt pill's spot.
+  A.termGap = () => !A.termShown || A.hitRadius == null ? 0
+    : (A.hitCenterY + A.hitRadius * 1.25 + A.termTop + (innerHeight - A.termTop) * .5) / 2;
+  // A swipe on the blank space: up from below the orb opens the terminal,
+  // down from above it closes it. True when it was one (not a tap).
+  A.termSwipe = (y0, y1) => {
+    if (A.hitRadius == null || Math.abs(y1 - y0) < 60) return false;
+    if (y1 < y0 && y0 > A.hitCenterY + A.hitRadius) A.termShow(true);
+    else if (y1 > y0 && y0 < A.hitCenterY - A.hitRadius) A.termShow(false);
+    else return false;
+    return true;
+  };
   function termClear() { if (term) term.log.textContent = ""; }
   A.termLines = (lines) => { termClear(); (lines || []).forEach(l => A.termLine(l.who, l.text)); };
   A.termLine = (who, text) => {
@@ -716,10 +747,11 @@ const AV = (() => {
   function termInit() {
     const css = document.createElement("style");
     css.textContent =
-      "#av-term{position:fixed;left:0;right:0;bottom:0;height:44vh;z-index:55;display:none;" +
+      "#av-term{position:fixed;left:0;right:0;bottom:0;height:44vh;z-index:55;display:flex;" +
+      "opacity:0;visibility:hidden;transition:opacity .35s,visibility .35s;" +
       "flex-direction:column;padding:0 max(16px,4vw) 14px;" +
       "font:13px/1.5 'SF Mono',Menlo,Consolas,monospace;color:rgb(150,230,175);cursor:auto}" +
-      "html.av-term-on #av-term{display:flex}" +
+      "html.av-term-on #av-term{opacity:1;visibility:visible}" +
       "#av-term .av-t-log{flex:1;overflow-y:auto;padding:0 2px 8px;scrollbar-width:none;" +
       "-webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 55%);" +
       "mask-image:linear-gradient(to bottom,transparent 0,#000 55%);" +
@@ -735,9 +767,7 @@ const AV = (() => {
       "#av-term input{flex:1;min-width:0;background:none;border:0;outline:0;color:rgb(200,245,215);" +
       "font:inherit;caret-color:rgb(110,240,150)}" +
       "#av-term input::placeholder{color:rgba(110,180,135,.5)}" +
-      "#av-term .av-t-p{color:rgb(90,200,130)}" +
-      // the Interrupt pill rides above the terminal while it's shown
-      "html.av-term-on #av-int{bottom:calc(44vh + 12px)!important}";
+      "#av-term .av-t-p{color:rgb(90,200,130)}";
     document.head.appendChild(css);
     const el = document.createElement("div");
     el.id = "av-term";
@@ -758,8 +788,9 @@ const AV = (() => {
       term.input.value = "";
       term.log.scrollTop = term.log.scrollHeight;
     });
-    const fit = () => {
-      const on = screen.height >= 600 && !SHOT;
+    const fit = termFit = () => {
+      const on = termOpen && screen.height >= 600 && !SHOT;
+      if (!on && document.activeElement === term.input) term.input.blur();
       document.documentElement.classList.toggle("av-term-on", on);
       A.termShown = on;
       A.termTop = on ? el.getBoundingClientRect().top : innerHeight;
