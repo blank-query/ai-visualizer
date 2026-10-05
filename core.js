@@ -94,6 +94,7 @@ const AV = (() => {
     A.setMode = (m) => viPaintMode(m);
     if (DISPLAY) { A._sndWant = false; VI = { connId: Q.get("device") || null }; }
     else if (A.backendWs && !DEMO) viInit();
+    if (!DEMO && (DISPLAY || A.backendWs)) termInit();
     A._ready = true;
     A._readyCbs.forEach(cb => cb(A));
     A._readyCbs = [];
@@ -376,6 +377,8 @@ const AV = (() => {
         // hands-free: the voice line is capturing an utterance from this
         // tab's open mic (the listening rings show, as for a press)
         else if (msg.type === "capturing") A.hfCapturing = !!msg.on;
+        else if (msg.type === "line") A.termLine(msg.who, msg.text);
+        else if (msg.type === "lines") { termClear(); msg.lines.forEach(l => A.termLine(l.who, l.text)); }
         else if (msg.type === "listen") {
           VI.hfMuted = !!msg.muted;
           viListen(!!msg.on);
@@ -643,6 +646,7 @@ const AV = (() => {
     // stage's tap-anywhere-queues handler above — no event plumbing
     // needed to keep them apart, they're just not in the same subtree.
     const btn = document.createElement("div");
+    btn.id = "av-int";
     btn.textContent = "INTERRUPT";
     btn.style.cssText =
       "position:fixed;left:50%;bottom:28px;transform:translateX(-50%);" +
@@ -669,6 +673,99 @@ const AV = (() => {
     document.body.appendChild(btn);
     VI = VI || {};   // viConnect() may not have run if backendWs was bad
     VI.btn = btn;
+  }
+
+  /* -------------------------------- terminal ------------------------------- */
+  // The conversation as text along the bottom, fading out toward the top,
+  // scrollable, with a box to type to the agent. Shown only where the
+  // screen is at least 600 CSS px tall in its current orientation (phones
+  // upright, the Fold's inner screen either way, desktops; not the Echo
+  // Show or a phone on its side). Uses the screen, not the window, so a
+  // phone keyboard opening doesn't hide it mid-typing. Lines arrive as
+  // "line" frames for this device's turns. Embedded in the app (display
+  // mode) the app owns the socket: it calls AV.termLine(who, text) /
+  // AV.termLines([...]), and typed text goes to window.JarvisApp.send.
+  // A.termTop is where it starts (CSS px from the top; the window's height
+  // when hidden), for a face to fit its orb above it.
+  let term = null;
+  A.termTop = innerHeight;
+  function termClear() { if (term) term.log.textContent = ""; }
+  A.termLines = (lines) => { termClear(); (lines || []).forEach(l => A.termLine(l.who, l.text)); };
+  A.termLine = (who, text) => {
+    if (!term) return;
+    const log = term.log;
+    const atEnd = log.scrollHeight - log.scrollTop - log.clientHeight < 40;
+    // consecutive lines from the same speaker join one entry
+    let last = log.lastElementChild;
+    if (!last || last.dataset.who !== who) {
+      last = document.createElement("div");
+      last.dataset.who = who;
+      last.className = "av-t-" + (who === "you" ? "you" : "ai");
+      const tag = document.createElement("span");
+      tag.className = "av-t-tag";
+      tag.textContent = who === "you" ? "> " : A.name.toLowerCase() + ": ";
+      last.appendChild(tag);
+      last.appendChild(document.createElement("span"));
+      log.appendChild(last);
+    }
+    const body = last.lastElementChild;
+    body.textContent += (body.textContent ? " " : "") + text;
+    while (log.childElementCount > 120) log.firstElementChild.remove();
+    if (atEnd) log.scrollTop = log.scrollHeight;
+  };
+  function termInit() {
+    const css = document.createElement("style");
+    css.textContent =
+      "#av-term{position:fixed;left:0;right:0;bottom:0;height:44vh;z-index:55;display:none;" +
+      "flex-direction:column;padding:0 max(16px,4vw) 14px;" +
+      "font:13px/1.5 'SF Mono',Menlo,Consolas,monospace;color:rgb(150,230,175);cursor:auto}" +
+      "html.av-term-on #av-term{display:flex}" +
+      "#av-term .av-t-log{flex:1;overflow-y:auto;padding:0 2px 8px;scrollbar-width:none;" +
+      "-webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 55%);" +
+      "mask-image:linear-gradient(to bottom,transparent 0,#000 55%);" +
+      "display:flex;flex-direction:column}" +
+      "#av-term .av-t-log::-webkit-scrollbar{display:none}" +
+      "#av-term .av-t-log>div:first-child{margin-top:auto}" +
+      "#av-term .av-t-log>div{margin:4px 0;white-space:pre-wrap;word-wrap:break-word}" +
+      "#av-term .av-t-tag{color:rgb(70,140,95)}" +
+      "#av-term .av-t-you{color:rgb(200,235,210)}" +
+      "#av-term form{display:flex;align-items:center;gap:8px;padding:9px 14px;" +
+      "border:1px solid rgba(90,200,130,.35);border-radius:10px;background:rgba(8,22,14,.75);" +
+      "-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px)}" +
+      "#av-term input{flex:1;min-width:0;background:none;border:0;outline:0;color:rgb(200,245,215);" +
+      "font:inherit;caret-color:rgb(110,240,150)}" +
+      "#av-term input::placeholder{color:rgba(110,180,135,.5)}" +
+      "#av-term .av-t-p{color:rgb(90,200,130)}" +
+      // the Interrupt pill rides above the terminal while it's shown
+      "html.av-term-on #av-int{bottom:calc(44vh + 12px)!important}";
+    document.head.appendChild(css);
+    const el = document.createElement("div");
+    el.id = "av-term";
+    el.innerHTML = '<div class="av-t-log"></div>' +
+      '<form autocomplete="off"><span class="av-t-p">&gt;</span>' +
+      '<input enterkeyhint="send" placeholder="message ' + A.name.toLowerCase() + '"></form>';
+    document.body.appendChild(el);
+    term = { el, log: el.firstElementChild, input: el.querySelector("input") };
+    // typing, scrolling, and taps here never reach the face's own handlers
+    ["pointerdown", "pointerup", "keydown"].forEach(t => el.addEventListener(t, e => e.stopPropagation()));
+    el.querySelector("form").addEventListener("submit", (e) => {
+      e.preventDefault();
+      const t = term.input.value.trim();
+      if (!t) return;
+      if (DISPLAY) { if (window.JarvisApp) window.JarvisApp.send(t); }
+      else if (VI && VI.ws && VI.ws.readyState === 1) VI.ws.send(JSON.stringify({ type: "text", text: t }));
+      else return;    // offline: keep what was typed
+      term.input.value = "";
+      term.log.scrollTop = term.log.scrollHeight;
+    });
+    const fit = () => {
+      const on = screen.height >= 600 && !SHOT;
+      document.documentElement.classList.toggle("av-term-on", on);
+      A.termShown = on;
+      A.termTop = on ? el.getBoundingClientRect().top : innerHeight;
+    };
+    addEventListener("resize", fit);
+    fit();
   }
 
   /* ----------------------------- thinking sound ---------------------------- */

@@ -583,7 +583,10 @@ function frame(dt){
     else peakH[i]*=Math.pow(.98,dt60);
   }
 
-  const cxp=W>>1, cyp=H>>1;
+  // With the terminal along the bottom (core.js), the orb centers in the
+  // space above where its text fades in (half its height).
+  const room=AV.termShown?Math.min(H,AV.termTop+(H-AV.termTop)*.5):H;
+  const cxp=W>>1, cyp=room>>1;
   const innerR=Math.min(cxp,cyp)*.42*SIZE;
   const maxLen=Math.min(cxp,cyp)*.65;
   // Tap-to-talk should only fire on the orb itself, not the empty
@@ -786,7 +789,8 @@ function drawUsage(){
   ctx.save();
   ctx.font=`${fs}px 'SF Mono',Menlo,Consolas,monospace`;
   ctx.textAlign="left";ctx.textBaseline="alphabetic";
-  let y=H-16-(rows.length-1)*(fs+6);
+  // top-left while the terminal holds the bottom of the screen
+  let y=AV.termShown?16+fs:H-16-(rows.length-1)*(fs+6);
   for(const r of rows){
     ctx.fillStyle="rgb(78,120,96)";
     ctx.fillText(r.label,18,y);
