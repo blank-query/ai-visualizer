@@ -499,6 +499,8 @@ const AV = (() => {
     const stage = document.getElementById("stage");
     const deg = Number(A.modeHues[mode]) || 0;
     if (stage) stage.style.filter = deg ? `hue-rotate(${deg}deg)` : "";
+    // the terminal lives outside #stage; it reads this to shift with it
+    document.documentElement.style.setProperty("--av-mode-filter", deg ? `hue-rotate(${deg}deg)` : "none");
   }
   async function viListen(on) {
     if (on === !!VI.hf) return;
@@ -769,7 +771,8 @@ const AV = (() => {
       "box-shadow:inset 0 -18px 30px -24px rgba(90,200,130,.35);" +
       "-webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 55%);" +
       "mask-image:linear-gradient(to bottom,transparent 0,#000 55%);" +
-      "font:13px/1.5 'SF Mono',Menlo,Consolas,monospace;color:rgb(150,230,175);cursor:auto}" +
+      "font:13px/1.5 'SF Mono',Menlo,Consolas,monospace;color:rgb(150,230,175);cursor:auto;" +
+      "filter:var(--av-mode-filter,none)}" +
       "html.av-term-on #av-term{opacity:1;visibility:visible;clip-path:inset(0 0 0 0)}" +
       // the top padding lets the oldest line scroll down out of the fade
       "#av-term .av-t-log{flex:1;overflow-y:auto;padding:25vh 2px 8px;scrollbar-width:none;" +
