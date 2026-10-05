@@ -749,7 +749,7 @@ const AV = (() => {
     css.textContent =
       "#av-term{position:fixed;left:0;right:0;bottom:0;height:44vh;z-index:55;display:flex;" +
       "opacity:0;visibility:hidden;transition:opacity .35s,visibility .35s;" +
-      "flex-direction:column;margin:0 max(12px,3vw) 12px;padding:0 12px 10px;" +
+      "flex-direction:column;margin:0 max(12px,3vw);padding:0 12px 10px;" +
       // a TUI frame: side rules and bottom corners, fading out with the
       // text toward the top
       "border:1px solid rgba(90,200,130,.45);border-top:0;border-radius:0 0 6px 6px;" +
@@ -758,7 +758,8 @@ const AV = (() => {
       "mask-image:linear-gradient(to bottom,transparent 0,#000 55%);" +
       "font:13px/1.5 'SF Mono',Menlo,Consolas,monospace;color:rgb(150,230,175);cursor:auto}" +
       "html.av-term-on #av-term{opacity:1;visibility:visible}" +
-      "#av-term .av-t-log{flex:1;overflow-y:auto;padding:0 2px 8px;scrollbar-width:none;" +
+      // the top padding lets the oldest line scroll down out of the fade
+      "#av-term .av-t-log{flex:1;overflow-y:auto;padding:25vh 2px 8px;scrollbar-width:none;" +
       "display:flex;flex-direction:column}" +
       "#av-term .av-t-log::-webkit-scrollbar{display:none}" +
       "#av-term .av-t-log>div:first-child{margin-top:auto}" +
@@ -775,6 +776,8 @@ const AV = (() => {
     document.head.appendChild(css);
     const el = document.createElement("div");
     el.id = "av-term";
+    // clear of the browser's sound toggle (bottom left); the app has none
+    el.style.bottom = DISPLAY ? "24px" : "48px";
     el.innerHTML = '<div class="av-t-log"></div>' +
       '<form autocomplete="off"><span class="av-t-p">&gt;</span>' +
       '<input enterkeyhint="send" placeholder="message ' + A.name.toLowerCase() + '"></form>';
