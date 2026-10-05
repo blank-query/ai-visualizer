@@ -565,7 +565,18 @@ const AV = (() => {
       // whole-stage behavior.
       if (A.hitRadius != null) {
         const dx = e.clientX - A.hitCenterX, dy = e.clientY - A.hitCenterY;
-        if (dx * dx + dy * dy > A.hitRadius * A.hitRadius) { tapDownAt = e.timeStamp; return; }
+        if (dx * dx + dy * dy > A.hitRadius * A.hitRadius) {
+          tapDownAt = e.timeStamp;
+          // held half a second in hands-free: paused while held
+          clearTimeout(muteT);
+          muteT = setTimeout(() => {
+            if (VI && VI.hf && !VI.hfMuted && VI.ws && VI.ws.readyState === 1) {
+              muteHeld = true;
+              VI.ws.send(JSON.stringify({ type: "hands_free", on: true, muted: true }));
+            }
+          }, 500);
+          return;
+        }
       }
       e.preventDefault(); viPress(false);
     });
@@ -573,9 +584,20 @@ const AV = (() => {
       stage.addEventListener(evt, () => viRelease()));
     // Clicks on the blank space around the orb, counted until they stop
     // (same as the phone app's taps), all silent, the color answers:
-    // triple = hands-free on/off, double while hands-free = pause/resume.
-    let tapDownAt = 0, taps = 0, tapT = null;
+    // triple = hands-free on/off, double while hands-free = pause/resume,
+    // and holding it in hands-free pauses until you let go.
+    let tapDownAt = 0, taps = 0, tapT = null, muteT = null, muteHeld = false;
+    const endMute = () => {
+      clearTimeout(muteT);
+      if (!muteHeld) return false;
+      muteHeld = false;
+      if (VI.ws && VI.ws.readyState === 1)
+        VI.ws.send(JSON.stringify({ type: "hands_free", on: true, muted: false }));
+      return true;
+    };
+    ["pointercancel", "pointerleave"].forEach(evt => stage.addEventListener(evt, endMute));
     stage.addEventListener("pointerup", (e) => {
+      if (endMute()) { tapDownAt = 0; return; }
       if (!tapDownAt || e.timeStamp - tapDownAt > 300) { tapDownAt = 0; return; }
       tapDownAt = 0; taps++;
       clearTimeout(tapT);
