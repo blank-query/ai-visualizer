@@ -198,7 +198,7 @@ const AV = (() => {
       VI.btn.style.display =
         ((A.recording ? lastWorking
                        : A.state === "thinking" || A.state === "speaking")
-         || VI.btnPressed)
+         || VI.btnPressed || VI.call)
           ? "block" : "none";
     // With the terminal open, the pill sits centered in the gap between
     // the orb and the terminal; closed, 28 px off the bottom. It glides
@@ -391,6 +391,7 @@ const AV = (() => {
         // tab's open mic (the listening rings show, as for a press)
         else if (msg.type === "capturing") A.hfCapturing = !!msg.on;
         else if (msg.type === "line") A.termLine(msg.who, msg.text);
+        else if (msg.type === "call") viCall(msg);
         else if (msg.type === "lines") { termClear(); msg.lines.forEach(l => A.termLine(l.who, l.text)); }
         else if (msg.type === "listen") {
           VI.hfMuted = !!msg.muted;
@@ -413,7 +414,8 @@ const AV = (() => {
     if (ctx.state !== "running" && !VI.pausedForQueue) ctx.resume().catch(() => {});
     const abuf = ctx.createBuffer(1, i16.length, rate);
     const chan = abuf.getChannelData(0);
-    for (let i = 0; i < i16.length; i++) chan[i] = i16[i] / 32768;
+    let sq = 0;
+    for (let i = 0; i < i16.length; i++) { chan[i] = i16[i] / 32768; sq += i16[i] * i16[i]; }
     const src = ctx.createBufferSource();
     src.buffer = abuf;
     src.connect(ctx.destination);
@@ -421,6 +423,10 @@ const AV = (() => {
     if (VI.nextPlayTime < now + 0.02) VI.nextPlayTime = now + 0.05;
     src.start(VI.nextPlayTime);
     VI.nextPlayTime += abuf.duration;
+    // On a call the far end streams nonstop, so this tab goes deaf only
+    // while it actually plays a voice (the browser's echo cancellation
+    // can't hear this page's own playback): speakers take turns.
+    if (VI.call && Math.sqrt(sq / i16.length) > 500) VI.loudUntil = VI.nextPlayTime + 0.3;
     VI.sources = VI.sources || [];
     VI.sources.push(src);
     src.onended = () => {
@@ -452,13 +458,15 @@ const AV = (() => {
       // deprecated but universal; AudioWorkletNode is the future upgrade
       const proc = ctx.createScriptProcessor(4096, 1, 1);
       proc.onaudioprocess = (e) => {
-        if (!(A.recording || VI.hf) || !VI.ws || VI.ws.readyState !== 1) return;
+        if (!(A.recording || VI.hf || VI.call) || !VI.ws || VI.ws.readyState !== 1) return;
+        // On a call: deaf only while the far end's voice plays (viOnMessage).
+        if (VI.call) { if (VI.playCtx && VI.playCtx.currentTime < (VI.loudUntil || 0)) return; }
         // Hands-free goes deaf while this tab plays anything of its own:
         // the reply (plus a short tail) and the thinking sound. This is
         // the ONLY hands-free gate; the voice line doesn't care whose
         // turn it is. The open mic heard both and Whisper turned them
         // into words ("1, 2, 3... 9, 9, 9" from the thinking sound).
-        if (!A.recording && ((audio && !audio.paused) || (VI.playCtx
+        else if (!A.recording && ((audio && !audio.paused) || (VI.playCtx
             && VI.nextPlayTime > VI.playCtx.currentTime - 0.3))) return;
         const input = e.inputBuffer.getChannelData(0);
         const i16 = new Int16Array(input.length);
@@ -494,6 +502,14 @@ const AV = (() => {
     try { VI.capCtx.close(); } catch (e) {}
     if (VI.capStream) VI.capStream.getTracks().forEach(t => t.stop());
     VI.proc = VI.capCtx = VI.mute = VI.capStream = null;
+  }
+  // An intercom call: the mic streams (as for hands-free) until it ends,
+  // and the Interrupt pill becomes HANG UP.
+  function viCall(msg) {
+    if (msg.on && !VI.call) { VI.hfBeforeCall = VI.hf; if (!VI.hf) viListen(true); }
+    if (!msg.on && VI.call && !VI.hfBeforeCall) viListen(false);
+    VI.call = msg.on ? (msg.with || "?") : null;
+    if (VI.btn) VI.btn.textContent = VI.call ? "HANG UP" : "INTERRUPT";
   }
   function viPaintMode(mode) {
     const stage = document.getElementById("stage");
@@ -689,12 +705,14 @@ const AV = (() => {
     btn.addEventListener("pointerdown", (e) => {
       e.preventDefault();
       e.stopPropagation();
+      if (VI.call) { VI.ws.send(JSON.stringify({ type: "hangup" })); return; }
       VI.btnPressed = true;   // held through the state flip to "listening"
       viPress(true);
     });
     ["pointerup", "pointercancel", "pointerleave"].forEach(evt =>
       btn.addEventListener(evt, (e) => {
         e.stopPropagation();
+        if (!VI.btnPressed) return;     // a HANG UP tap, or a leave without a press
         VI.btnPressed = false;
         viRelease();
       }));
