@@ -344,7 +344,28 @@ const AV = (() => {
     } catch (e) { /* bad backend_ws URL: voice input just stays off */ }
   }
   function viPlayCtx() {
-    if (!VI.playCtx) { VI.playCtx = new AudioContext(); VI.nextPlayTime = 0; }
+    if (!VI.playCtx) {
+      VI.playCtx = new AudioContext(); VI.nextPlayTime = 0;
+      // A page may not make sound until it has been clicked once (after
+      // a reload, hands-free has no press to count). Show why, and let
+      // ANY click anywhere unlock it.
+      const note = document.createElement("div");
+      note.textContent = "CLICK ANYWHERE TO ENABLE SOUND";
+      note.style.cssText =
+        "position:fixed;left:50%;top:18px;transform:translateX(-50%);z-index:70;" +
+        "display:none;padding:8px 16px;border-radius:20px;pointer-events:none;" +
+        "font:12px 'SF Mono',Menlo,Consolas,monospace;letter-spacing:.15em;" +
+        "color:rgba(235,245,235,.85);background:rgba(40,60,45,.6)";
+      document.body.appendChild(note);
+      const show = () => { note.style.display =
+        VI.playCtx.state === "running" || VI.pausedForQueue ? "none" : "block"; };
+      VI.playCtx.onstatechange = show;
+      addEventListener("pointerdown", () => {
+        if (VI.playCtx.state !== "running" && !VI.pausedForQueue)
+          VI.playCtx.resume().catch(() => {});
+      }, true);
+      setTimeout(show, 500);
+    }
     return VI.playCtx;
   }
   function viOnMessage(ev) {
@@ -539,6 +560,8 @@ const AV = (() => {
   }
   function viInit() {
     viConnect();
+    VI = VI || {};
+    viPlayCtx();
     const stage = document.getElementById("stage");
     if (!stage) return;
     // The faces hide the cursor (cursor:none in their own CSS) for a
