@@ -712,10 +712,10 @@ const AV = (() => {
   let term = null, termOpen = false, termFit = () => {};
   A.termTop = innerHeight;
   A.termShow = (on) => { termOpen = !!on; termFit(); };
-  // The middle of the gap between the orb and the terminal's visible text
+  // The middle of the gap between the orb and the terminal's top edge
   // (CSS px from the top), or 0 when it's hidden; the Interrupt pill's spot.
   A.termGap = () => !A.termShown || A.hitRadius == null ? 0
-    : (A.hitCenterY + A.hitRadius * 1.25 + A.termTop + (innerHeight - A.termTop) * .5) / 2;
+    : (A.hitCenterY + A.hitRadius * 1.25 + A.termTop) / 2;
   // A swipe on the blank space around the orb (callers check it started
   // off the orb): up opens the terminal, down closes it. True when it was
   // one (not a tap). Requiring "below" / "above" the orb was too fussy: on

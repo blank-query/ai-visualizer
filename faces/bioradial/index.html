@@ -584,9 +584,10 @@ function frame(dt){
   }
 
   // With the terminal along the bottom (core.js), the orb centers in the
-  // space above where its text fades in (half its height).
+  // space above it (sir: above where its text fades in sat too low on a
+  // portrait monitor, and the Interrupt pill landed on the terminal).
   // Eased, so the orb glides up as the terminal opens and back as it closes.
-  const roomT=AV.termShown?Math.min(H,AV.termTop+(H-AV.termTop)*.5):H;
+  const roomT=AV.termShown?Math.min(H,AV.termTop):H;
   room=room==null?roomT:room+(roomT-room)*Math.min(1,.12*dt60);
   const cxp=W>>1, cyp=room>>1;
   const innerR=Math.min(cxp,cyp)*.42*SIZE;
