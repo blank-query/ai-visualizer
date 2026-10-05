@@ -124,7 +124,10 @@ function barTargets(out){
    pushes grains outward FROM THE CENTER, hardest at the core, barely at
    the crust. Rising energy fires a blast transient that rebounds fast,
    so every syllable detonates. */
-const ORB_N=6200;
+// ?size= scales the orb, ?swarm= the share of its particles (a phone's
+// small, dense screen wants a bigger orb with a sparser swarm).
+const SIZE=Math.min(1.6,Math.max(.5,parseFloat(Q.get("size"))||1));
+const ORB_N=Math.round(6200*Math.min(1,Math.max(.1,parseFloat(Q.get("swarm"))||1)));
 const orb={};
 function orbBuild(){
   const r32=(s=>{let a=s;return()=>{a|=0;a=a+0x6D2B79F5|0;
@@ -568,7 +571,7 @@ function frame(dt){
   }
 
   const cxp=W>>1, cyp=H>>1;
-  const innerR=Math.min(cxp,cyp)*.42;
+  const innerR=Math.min(cxp,cyp)*.42*SIZE;
   const maxLen=Math.min(cxp,cyp)*.65;
   // Tap-to-talk should only fire on the orb itself, not the empty
   // margins of a full-screen canvas; core.js reads these three and
