@@ -749,20 +749,24 @@ const AV = (() => {
     css.textContent =
       "#av-term{position:fixed;left:0;right:0;bottom:0;height:44vh;z-index:55;display:flex;" +
       "opacity:0;visibility:hidden;transition:opacity .35s,visibility .35s;" +
-      "flex-direction:column;padding:0 max(16px,4vw) 14px;" +
+      "flex-direction:column;margin:0 max(12px,3vw) 12px;padding:0 12px 10px;" +
+      // a TUI frame: side rules and bottom corners, fading out with the
+      // text toward the top
+      "border:1px solid rgba(90,200,130,.45);border-top:0;border-radius:0 0 6px 6px;" +
+      "box-shadow:inset 0 -18px 30px -24px rgba(90,200,130,.35);" +
+      "-webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 55%);" +
+      "mask-image:linear-gradient(to bottom,transparent 0,#000 55%);" +
       "font:13px/1.5 'SF Mono',Menlo,Consolas,monospace;color:rgb(150,230,175);cursor:auto}" +
       "html.av-term-on #av-term{opacity:1;visibility:visible}" +
       "#av-term .av-t-log{flex:1;overflow-y:auto;padding:0 2px 8px;scrollbar-width:none;" +
-      "-webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 55%);" +
-      "mask-image:linear-gradient(to bottom,transparent 0,#000 55%);" +
       "display:flex;flex-direction:column}" +
       "#av-term .av-t-log::-webkit-scrollbar{display:none}" +
       "#av-term .av-t-log>div:first-child{margin-top:auto}" +
       "#av-term .av-t-log>div{margin:4px 0;white-space:pre-wrap;word-wrap:break-word}" +
       "#av-term .av-t-tag{color:rgb(70,140,95)}" +
       "#av-term .av-t-you{color:rgb(200,235,210)}" +
-      "#av-term form{display:flex;align-items:center;gap:8px;padding:9px 14px;" +
-      "border:1px solid rgba(90,200,130,.35);border-radius:10px;background:rgba(8,22,14,.75);" +
+      "#av-term form{display:flex;align-items:center;gap:8px;padding:9px 12px;" +
+      "border:1px solid rgba(90,200,130,.35);border-radius:4px;background:rgba(8,22,14,.75);" +
       "-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px)}" +
       "#av-term input{flex:1;min-width:0;background:none;border:0;outline:0;color:rgb(200,245,215);" +
       "font:inherit;caret-color:rgb(110,240,150)}" +
