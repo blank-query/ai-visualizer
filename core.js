@@ -201,11 +201,17 @@ const AV = (() => {
          || VI.btnPressed)
           ? "block" : "none";
     // With the terminal open, the pill sits centered in the gap between
-    // the orb and where the terminal's text becomes visible.
+    // the orb and the terminal; closed, 28 px off the bottom. It glides
+    // between the two (eased here, the orb eases the same way), so it
+    // tucks in toward the orb on the way up and drifts off on the way down.
     if (VI && VI.btn) {
+      const h = VI.btn.offsetHeight || 56;
       const gap = A.termGap();
-      VI.btn.style.top = gap ? (gap - VI.btn.offsetHeight / 2) + "px" : "";
-      VI.btn.style.bottom = gap ? "auto" : "";
+      const target = gap ? gap - h / 2 : innerHeight - 28 - h;
+      VI.btnTop = VI.btnTop == null ? target
+        : VI.btnTop + (target - VI.btnTop) * Math.min(1, .12 * dt / 16.667);
+      VI.btn.style.top = VI.btnTop + "px";
+      VI.btn.style.bottom = "auto";
     }
     A.alert = !!raw.alert;
     // Running background tasks (satellites). ?tasks=N in the URL forces a
@@ -753,7 +759,9 @@ const AV = (() => {
     const css = document.createElement("style");
     css.textContent =
       "#av-term{position:fixed;left:0;right:0;bottom:0;height:44vh;z-index:55;display:flex;" +
-      "opacity:0;visibility:hidden;transition:opacity .35s,visibility .35s;" +
+      // revealed by a wipe upward, and wiped back down when closed
+      "opacity:0;visibility:hidden;clip-path:inset(100% 0 0 0);" +
+      "transition:opacity .45s,visibility .45s,clip-path .45s cubic-bezier(.2,.7,.2,1);" +
       "flex-direction:column;margin:0 max(12px,3vw);padding:0 12px 10px;" +
       // a TUI frame: side rules and bottom corners, fading out with the
       // text toward the top
@@ -762,7 +770,7 @@ const AV = (() => {
       "-webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 55%);" +
       "mask-image:linear-gradient(to bottom,transparent 0,#000 55%);" +
       "font:13px/1.5 'SF Mono',Menlo,Consolas,monospace;color:rgb(150,230,175);cursor:auto}" +
-      "html.av-term-on #av-term{opacity:1;visibility:visible}" +
+      "html.av-term-on #av-term{opacity:1;visibility:visible;clip-path:inset(0 0 0 0)}" +
       // the top padding lets the oldest line scroll down out of the fade
       "#av-term .av-t-log{flex:1;overflow-y:auto;padding:25vh 2px 8px;scrollbar-width:none;" +
       "display:flex;flex-direction:column}" +
