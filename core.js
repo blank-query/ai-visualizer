@@ -633,14 +633,19 @@ const AV = (() => {
     };
     ["pointercancel", "pointerleave"].forEach(evt => stage.addEventListener(evt, endMute));
     let swipeY0 = null;
-    stage.addEventListener("pointerdown", (e) => { swipeY0 = e.clientY; }, true);
+    stage.addEventListener("pointerdown", (e) => {
+      swipeY0 = e.clientY;
+      // keep the drag: a swipe down ends over the terminal, which would
+      // otherwise swallow the release
+      try { stage.setPointerCapture(e.pointerId); } catch (err) {}
+    }, true);
     stage.addEventListener("pointermove", (e) => {
       // a drag is a swipe, never a hold-to-pause
       if (swipeY0 != null && Math.abs(e.clientY - swipeY0) > 30) clearTimeout(muteT);
     });
     stage.addEventListener("pointerup", (e) => {
       const y0 = swipeY0; swipeY0 = null;
-      if (y0 != null && !muteHeld && A.termSwipe(y0, e.clientY)) { tapDownAt = 0; return; }
+      if (y0 != null && tapDownAt && !muteHeld && A.termSwipe(y0, e.clientY)) { tapDownAt = 0; return; }
       if (endMute()) { tapDownAt = 0; return; }
       if (!tapDownAt || e.timeStamp - tapDownAt > 300) { tapDownAt = 0; return; }
       tapDownAt = 0; taps++;
@@ -711,13 +716,13 @@ const AV = (() => {
   // (CSS px from the top), or 0 when it's hidden; the Interrupt pill's spot.
   A.termGap = () => !A.termShown || A.hitRadius == null ? 0
     : (A.hitCenterY + A.hitRadius * 1.25 + A.termTop + (innerHeight - A.termTop) * .5) / 2;
-  // A swipe on the blank space: up from below the orb opens the terminal,
-  // down from above it closes it. True when it was one (not a tap).
+  // A swipe on the blank space around the orb (callers check it started
+  // off the orb): up opens the terminal, down closes it. True when it was
+  // one (not a tap). Requiring "below" / "above" the orb was too fussy: on
+  // a wide window the strip above the orb is thin.
   A.termSwipe = (y0, y1) => {
-    if (A.hitRadius == null || Math.abs(y1 - y0) < 60) return false;
-    if (y1 < y0 && y0 > A.hitCenterY + A.hitRadius) A.termShow(true);
-    else if (y1 > y0 && y0 < A.hitCenterY - A.hitRadius) A.termShow(false);
-    else return false;
+    if (Math.abs(y1 - y0) < 60) return false;
+    A.termShow(y1 < y0);
     return true;
   };
   function termClear() { if (term) term.log.textContent = ""; }
