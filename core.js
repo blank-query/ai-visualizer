@@ -565,12 +565,29 @@ const AV = (() => {
       // whole-stage behavior.
       if (A.hitRadius != null) {
         const dx = e.clientX - A.hitCenterX, dy = e.clientY - A.hitCenterY;
-        if (dx * dx + dy * dy > A.hitRadius * A.hitRadius) return;
+        if (dx * dx + dy * dy > A.hitRadius * A.hitRadius) { tapDownAt = e.timeStamp; return; }
       }
       e.preventDefault(); viPress(false);
     });
     ["pointerup", "pointercancel", "pointerleave"].forEach(evt =>
       stage.addEventListener(evt, () => viRelease()));
+    // Clicks on the blank space around the orb, counted until they stop
+    // (same as the phone app's taps), all silent, the color answers:
+    // triple = hands-free on/off, double while hands-free = pause/resume.
+    let tapDownAt = 0, taps = 0, tapT = null;
+    stage.addEventListener("pointerup", (e) => {
+      if (!tapDownAt || e.timeStamp - tapDownAt > 300) { tapDownAt = 0; return; }
+      tapDownAt = 0; taps++;
+      clearTimeout(tapT);
+      tapT = setTimeout(() => {
+        const n = taps; taps = 0;
+        const on = !!(VI && VI.hf) || !!(VI && VI.hfMuted);
+        const set = (o, m) => VI.ws && VI.ws.readyState === 1 &&
+          VI.ws.send(JSON.stringify({ type: "hands_free", on: o, muted: m }));
+        if (n >= 3) set(!on, false);
+        else if (n === 2 && on) set(true, !VI.hfMuted);
+      }, 350);
+    });
 
     // ONE Interrupt button, shown only while Jarvis is working (tick()
     // toggles it via A.state). It's a separate element appended to
