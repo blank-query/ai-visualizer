@@ -352,6 +352,9 @@ const AV = (() => {
       try {
         const msg = JSON.parse(ev.data);
         if (msg.type === "stop") viStopPlayback();
+        // hands-free: the voice line is capturing an utterance from this
+        // tab's open mic (the listening rings show, as for a press)
+        else if (msg.type === "capturing") A.hfCapturing = !!msg.on;
         else if (msg.type === "listen") {
           VI.hfMuted = !!msg.muted;
           viListen(!!msg.on);
