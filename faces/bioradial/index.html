@@ -336,7 +336,7 @@ function drawSonar(cxp,cyp,innerR,maxLen,dt60,spawn){
   sonarWas=spawn;
   if(spawn&&--rippleCool<=0){
     ripples.push([innerR*1.15,110]);
-    rippleCool=150+Math.random()*90|0;
+    rippleCool=65+Math.random()*35|0;   // a ring every ~1.1-1.7 s (sir: was 2.5-4 s)
   }
   const maxR=innerR+maxLen;
   for(const rp of ripples){
