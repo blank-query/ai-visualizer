@@ -328,7 +328,12 @@ function drawGalaxy(dt60){
 
 /* ---------------- idle + working ornaments ---------------- */
 const ripples=[];let rippleCool=0;
+let sonarWas=false;
 function drawSonar(cxp,cyp,innerR,maxLen,dt60,spawn){
+  // the first ring the moment listening starts: the spacing countdown
+  // used to carry over between captures, delaying it by up to ~4 s
+  if(spawn&&!sonarWas)rippleCool=0;
+  sonarWas=spawn;
   if(spawn&&--rippleCool<=0){
     ripples.push([innerR*1.15,110]);
     rippleCool=150+Math.random()*90|0;
