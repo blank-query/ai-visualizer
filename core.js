@@ -120,6 +120,40 @@ const AV = (() => {
     }, 120);
   }
 
+  /* --------------------------------- timers -------------------------------- */
+  // Countdowns a session sent this device (<<timers>>, via /state): the
+  // next three, soonest first, plus any clock-time line ("eating 7:42 PM").
+  // Nothing at all when there are none. Tinted with the mic mode like the
+  // terminal.
+  let timersEl = null;
+  setInterval(() => {
+    const list = (raw && raw.timers) || [];
+    if (!list.length) { if (timersEl) timersEl.style.display = "none"; return; }
+    if (!timersEl) {
+      timersEl = document.createElement("div");
+      timersEl.style.cssText =
+        "position:fixed;top:18px;left:50%;transform:translateX(-50%);z-index:50;" +
+        "min-width:220px;pointer-events:none;filter:var(--av-mode-filter,none);" +
+        "font:14px/1.6 'SF Mono',Menlo,Consolas,monospace;letter-spacing:.06em;" +
+        "color:rgb(150,230,175);text-shadow:0 0 8px rgba(90,200,130,.5)";
+      document.body.appendChild(timersEl);
+    }
+    const now = Date.now() / 1000;
+    const esc = (t) => String(t).replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+    const row = (label, val, bright) =>
+      `<div style="display:flex;justify-content:space-between;gap:24px;opacity:${bright ? 1 : .6}">` +
+      `<span>${esc(label).toUpperCase()}</span><span>${val}</span></div>`;
+    const down = list.filter(t => !t.clock).sort((x, y) => x.at - y.at).slice(0, 3);
+    const clock = list.filter(t => t.clock);
+    timersEl.innerHTML =
+      down.map((t, i) => {
+        const left = Math.max(0, Math.round(t.at - now));
+        return row(t.label, left ? `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}` : "NOW", i === 0);
+      }).join("") +
+      clock.map(t => row(t.label, new Date(t.at * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }), false)).join("");
+    timersEl.style.display = "block";
+  }, 250);
+
   /* ------------------------------ demo driver ------------------------------ */
   // A scripted voice turn: the face performs everything with no voice line.
   const SCRIPT = [["idle", 6000], ["listening", 3500], ["thinking", 4200],

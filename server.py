@@ -165,9 +165,14 @@ def mock_bus():
 def read_bus(device: str = ""):
     if MOCK:
         return mock_bus()
-    own = _device_bus(device)
-    if own is not None:
-        return own
+    entry = _device_entry(device)
+    out = _owned_state(device, entry) if entry.get("owned") else _shared_bus()
+    # countdowns for this device's face (<<timers>>), owned or not
+    out["timers"] = entry.get("timers") or []
+    return out
+
+
+def _shared_bus():
     try:
         state = (BUS / ".voice_state").read_text().strip().lower()
         if state not in STATES:
@@ -223,19 +228,21 @@ def read_bus(device: str = ""):
             "tasks": tasks, "active_conn": active_conn}
 
 
-def _device_bus(device: str):
-    """A device owned by a second agent session (cook-with-me in the
-    kitchen) has its own channel in `.voice_devices`, {id: {state, samples,
-    wave_ts, tasks}}, written by the voice line; that device reads it
-    instead of the shared bus. None = not owned, use the bus."""
+def _device_entry(device: str) -> dict:
+    """This device's entry in `.voice_devices` (written by the voice line),
+    {} if none: {owned, state, samples, wave_ts, tasks, timers}. A device
+    owned by a second agent session (cook-with-me in the kitchen) reads
+    its state from here instead of the shared bus."""
     if not device:
-        return None
+        return {}
     try:
         d = json.loads((BUS / ".voice_devices").read_text()).get(device)
     except (OSError, ValueError, AttributeError):
-        return None
-    if not isinstance(d, dict):
-        return None
+        return {}
+    return d if isinstance(d, dict) else {}
+
+
+def _owned_state(device: str, d: dict):
     state = d.get("state") if d.get("state") in STATES else "idle"
     samples, level = [0.0] * 64, 0.0
     raw = d.get("samples") or []
