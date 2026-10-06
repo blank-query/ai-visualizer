@@ -428,6 +428,7 @@ const AV = (() => {
         else if (msg.type === "capturing") A.hfCapturing = !!msg.on;
         else if (msg.type === "line") A.termLine(msg.who, msg.text);
         else if (msg.type === "call") viCall(msg);
+        else if (msg.type === "show") msg.close ? A.showDoc(null) : A.showDoc(msg.title, msg.markdown);
         else if (msg.type === "lines") { termClear(); msg.lines.forEach(l => A.termLine(l.who, l.text)); }
         else if (msg.type === "listen") {
           VI.hfMuted = !!msg.muted;
@@ -807,10 +808,72 @@ const AV = (() => {
       log.appendChild(last);
     }
     const body = last.lastElementChild;
-    body.textContent += (body.textContent ? " " : "") + text;
+    body.innerHTML += (body.innerHTML ? " " : "") + mdInline(esc(text));
     while (log.childElementCount > 120) log.firstElementChild.remove();
     if (atEnd) log.scrollTop = log.scrollHeight;
   };
+  /* ------------------------------ a little Markdown ----------------------------- */
+  // Enough for replies and notes: headings, lists, bold, italics, inline
+  // code, rules. Text is escaped first, so a note can never inject markup.
+  const esc = (t) => String(t).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const mdInline = (t) => t
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
+    .replace(/(^|[\s(])[*_]([^*_\s][^*_]*)[*_](?=[\s).,;:!?]|$)/g, "$1<i>$2</i>")
+    .replace(/\[\[([^\]|]+)(\|([^\]]+))?\]\]/g, (m, a, b, c) => c || a);
+  function mdBlock(md) {
+    const out = []; let list = null;
+    const close = () => { if (list) { out.push(`</${list}>`); list = null; } };
+    for (const raw of String(md).split("\n")) {
+      const line = raw.trimEnd(), t = esc(line.trim());
+      let m;
+      if (!t) { close(); continue; }
+      if ((m = t.match(/^(#{1,4})\s+(.*)/))) { close(); out.push(`<h${m[1].length + 1}>${mdInline(m[2])}</h${m[1].length + 1}>`); }
+      else if (/^(-{3,}|\*{3,})$/.test(t)) { close(); out.push("<hr>"); }
+      else if ((m = t.match(/^[-*]\s+(\[[ x]\]\s+)?(.*)/))) { if (list !== "ul") { close(); out.push("<ul>"); list = "ul"; } out.push(`<li>${mdInline(m[2])}</li>`); }
+      else if ((m = t.match(/^\d+[.)]\s+(.*)/))) { if (list !== "ol") { close(); out.push("<ol>"); list = "ol"; } out.push(`<li>${mdInline(m[1])}</li>`); }
+      else { close(); out.push(`<p>${mdInline(t)}</p>`); }
+    }
+    close();
+    return out.join("");
+  }
+
+  /* ------------------------------ full-screen reader ----------------------------- */
+  // A recipe or a list, whole: a card over the dimmed face, scrollable,
+  // closed by a tap outside it, the close mark, Escape, or "close that"
+  // (the voice line's {"type": "show", "close": true}). Tinted with the mode.
+  let reader = null;
+  A.showDoc = (title, md) => {
+    if (reader) { reader.remove(); reader = null; }
+    if (title == null) return;
+    reader = document.createElement("div");
+    reader.style.cssText =
+      "position:fixed;inset:0;z-index:80;background:rgba(0,6,3,.72);display:flex;" +
+      "align-items:center;justify-content:center;filter:var(--av-mode-filter,none)";
+    reader.innerHTML =
+      '<div class="av-doc" style="position:relative;width:min(760px,92vw);max-height:88vh;overflow-y:auto;' +
+      "padding:28px 30px 34px;border:1px solid rgba(90,200,130,.45);border-radius:10px;" +
+      "background:rgba(6,20,12,.94);color:rgb(200,240,212);font:16px/1.6 'SF Mono',Menlo,Consolas,monospace;" +
+      'box-shadow:0 0 40px rgba(60,200,120,.18)">' +
+      '<div class="av-x" style="position:absolute;top:10px;right:16px;cursor:pointer;font-size:22px;color:rgb(120,210,150)">&times;</div>' +
+      `<h1>${esc(title)}</h1>${mdBlock(md)}</div>`;
+    const css = document.getElementById("av-doc-css") || document.head.appendChild(Object.assign(
+      document.createElement("style"), { id: "av-doc-css", textContent:
+        ".av-doc h1{font-size:1.35em;margin:0 0 .6em;color:rgb(150,240,180)}" +
+        ".av-doc h2,.av-doc h3,.av-doc h4,.av-doc h5{margin:1.1em 0 .4em;color:rgb(140,225,170)}" +
+        ".av-doc ul,.av-doc ol{margin:.3em 0 .8em;padding-left:1.4em}.av-doc li{margin:.25em 0}" +
+        ".av-doc p{margin:.5em 0}.av-doc code{background:rgba(90,200,130,.12);padding:0 .3em;border-radius:3px}" +
+        ".av-doc hr{border:0;border-top:1px solid rgba(90,200,130,.3);margin:1em 0}" }));
+    void css;
+    reader.addEventListener("pointerdown", (e) => {
+      e.stopPropagation();
+      if (e.target === reader || e.target.classList.contains("av-x")) A.showDoc(null);
+    });
+    ["pointerup", "keydown"].forEach(t => reader.addEventListener(t, e => e.stopPropagation()));
+    document.body.appendChild(reader);
+  };
+  addEventListener("keydown", (e) => { if (e.key === "Escape" && reader) A.showDoc(null); });
+
   function termInit() {
     const css = document.createElement("style");
     css.textContent =
