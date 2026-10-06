@@ -112,7 +112,9 @@ const AV = (() => {
   if (!DEMO) {
     setInterval(async () => {
       try {
-        const r = await fetch("/state", { cache: "no-store" });
+        // this device's own state if a dedicated session owns it
+        const dev = DISPLAY ? (Q.get("device") || "") : DEVICE_ID;
+        const r = await fetch("/state?device=" + encodeURIComponent(dev), { cache: "no-store" });
         raw = await r.json();
       } catch (e) { /* server gone: hold last state */ }
     }, 120);

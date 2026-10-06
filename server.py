@@ -61,6 +61,7 @@ import threading
 import time
 import webbrowser
 import urllib.request
+from urllib.parse import parse_qs, urlparse
 import errno
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -161,9 +162,12 @@ def mock_bus():
             }}
 
 
-def read_bus():
+def read_bus(device: str = ""):
     if MOCK:
         return mock_bus()
+    own = _device_bus(device)
+    if own is not None:
+        return own
     try:
         state = (BUS / ".voice_state").read_text().strip().lower()
         if state not in STATES:
@@ -219,12 +223,38 @@ def read_bus():
             "tasks": tasks, "active_conn": active_conn}
 
 
+def _device_bus(device: str):
+    """A device owned by a second agent session (cook-with-me in the
+    kitchen) has its own channel in `.voice_devices`, {id: {state, samples,
+    wave_ts, tasks}}, written by the voice line; that device reads it
+    instead of the shared bus. None = not owned, use the bus."""
+    if not device:
+        return None
+    try:
+        d = json.loads((BUS / ".voice_devices").read_text()).get(device)
+    except (OSError, ValueError, AttributeError):
+        return None
+    if not isinstance(d, dict):
+        return None
+    state = d.get("state") if d.get("state") in STATES else "idle"
+    samples, level = [0.0] * 64, 0.0
+    raw = d.get("samples") or []
+    if raw and time.time() - float(d.get("wave_ts") or 0) < WAVEFORM_STALE_S:
+        state = "speaking"
+        samples = [float(x) for x in raw[:64]]
+        level = min(1.0, sum(abs(x) for x in samples) / len(samples) / 3000.0)
+    return {"state": state, "level": level, "samples": samples,
+            "alert": False, "loading": False, "rate_limits": {},
+            "tasks": max(0, int(d.get("tasks") or 0)), "active_conn": device}
+
+
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         path = self.path.split("?")[0]
         try:
             if path == "/state":
-                self._send(json.dumps(read_bus()).encode(),
+                q = parse_qs(urlparse(self.path).query)
+                self._send(json.dumps(read_bus((q.get("device") or [""])[0])).encode(),
                            "application/json")
             elif path == "/config":
                 out = {"name": CFG["name"], "badge": CFG["badge"],
