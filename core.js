@@ -845,6 +845,7 @@ const AV = (() => {
   let reader = null;
   A.showDoc = (title, md) => {
     if (reader) { reader.remove(); reader = null; }
+    A.readerOpen = title != null;     // the app lets touches through while it's up
     if (title == null) return;
     reader = document.createElement("div");
     reader.style.cssText =
