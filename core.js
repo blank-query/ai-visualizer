@@ -432,10 +432,10 @@ const AV = (() => {
         // hands-free: the voice line is capturing an utterance from this
         // tab's open mic (the listening rings show, as for a press)
         else if (msg.type === "capturing") A.hfCapturing = !!msg.on;
-        else if (msg.type === "line") A.termLine(msg.who, msg.text);
+        else if (msg.type === "line") A.termLine(msg.who, msg.text, msg.show);
         else if (msg.type === "call") viCall(msg);
         else if (msg.type === "show") msg.close ? A.showDoc(null) : A.showDoc(msg.title, msg.markdown);
-        else if (msg.type === "lines") { termClear(); msg.lines.forEach(l => A.termLine(l.who, l.text)); }
+        else if (msg.type === "lines") A.termLines(msg.lines);
         else if (msg.type === "listen") {
           VI.hfMuted = !!msg.muted;
           viListen(!!msg.on);
@@ -795,8 +795,15 @@ const AV = (() => {
     return true;
   };
   function termClear() { if (term) term.log.textContent = ""; }
-  A.termLines = (lines) => { termClear(); (lines || []).forEach(l => A.termLine(l.who, l.text)); };
-  A.termLine = (who, text) => {
+  A.termLines = (lines) => { termClear(); (lines || []).forEach(l => A.termLine(l.who, l.text, l.show)); };
+  // show: {title, path} from a <<show>>, a button that reopens that card
+  // with the file's current contents (the app relays it, else the socket)
+  A.reopenDoc = (path) => {
+    const m = { type: "reopen", path };
+    if (window.JarvisApp && window.JarvisApp.reopen) window.JarvisApp.reopen(path);
+    else if (VI && VI.ws && VI.ws.readyState === 1) VI.ws.send(JSON.stringify(m));
+  };
+  A.termLine = (who, text, show) => {
     if (!term) return;
     const log = term.log;
     const atEnd = log.scrollHeight - log.scrollTop - log.clientHeight < 40;
@@ -814,7 +821,15 @@ const AV = (() => {
       log.appendChild(last);
     }
     const body = last.lastElementChild;
-    body.innerHTML += (body.innerHTML ? " " : "") + mdInline(esc(text));
+    if (text) body.innerHTML += (body.innerHTML ? " " : "") + mdInline(esc(text));
+    if (show && show.path) {
+      const b = document.createElement("button");
+      b.type = "button"; b.className = "av-t-open";
+      b.textContent = "Open " + (show.title || "card");
+      b.dataset.path = show.path;     // a data attribute: later text rewrites innerHTML
+      body.appendChild(b);
+      log.onclick = (e) => { const o = e.target.closest(".av-t-open"); if (o) A.reopenDoc(o.dataset.path); };
+    }
     while (log.childElementCount > 120) log.firstElementChild.remove();
     if (atEnd) log.scrollTop = log.scrollHeight;
   };
@@ -916,6 +931,8 @@ const AV = (() => {
       "#av-term .av-t-log>div{margin:4px 0;white-space:pre-wrap;word-wrap:break-word}" +
       "#av-term .av-t-tag{color:rgb(70,140,95)}" +
       "#av-term .av-t-you{color:rgb(200,235,210)}" +
+      "#av-term .av-t-open{display:block;margin:6px 0 2px;padding:5px 12px;font:inherit;cursor:pointer;" +
+      "color:rgb(150,240,180);background:rgba(90,200,130,.12);border:1px solid rgba(90,200,130,.45);border-radius:4px}" +
       "#av-term form{display:flex;align-items:center;gap:8px;padding:9px 12px;" +
       "border:1px solid rgba(90,200,130,.35);border-radius:4px;background:rgba(8,22,14,.75);" +
       "-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px)}" +
