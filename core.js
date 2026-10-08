@@ -988,7 +988,8 @@ const AV = (() => {
     if (!t) return;
     const css = document.createElement("style");
     css.textContent = "#av-ver{position:fixed;right:10px;bottom:8px;z-index:40;pointer-events:none;" +
-      "font:11px/1 'SF Mono',Menlo,Consolas,monospace;letter-spacing:.06em;color:rgba(150,230,175,.35);" +
+      "font:13px/1 'SF Mono',Menlo,Consolas,monospace;letter-spacing:.06em;color:rgb(170,245,195);" +
+      "opacity:.8;text-shadow:0 0 6px rgba(0,0,0,.9);" +
       "filter:var(--av-mode-filter,none)}html.av-term-on #av-ver{display:none}";
     document.head.appendChild(css);
     const el = document.createElement("div");
