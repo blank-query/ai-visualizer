@@ -128,16 +128,22 @@ const AV = (() => {
   let timersEl = null;
   setInterval(() => {
     const list = (raw && raw.timers) || [];
-    if (!list.length) { if (timersEl) timersEl.style.display = "none"; return; }
+    if (!list.length) {
+      if (timersEl) timersEl.style.display = "none";
+      document.documentElement.style.setProperty("--av-timers-h", "0px");
+      return;
+    }
     if (!timersEl) {
       timersEl = document.createElement("div");
       timersEl.style.cssText =
-        "position:fixed;top:18px;left:50%;transform:translateX(-50%);z-index:50;" +
+        "position:fixed;top:18px;left:50%;transform:translateX(-50%);z-index:90;" +
         "min-width:220px;pointer-events:none;filter:var(--av-mode-filter,none);" +
         "font:14px/1.6 'SF Mono',Menlo,Consolas,monospace;letter-spacing:.06em;" +
         "color:rgb(150,230,175);text-shadow:0 0 8px rgba(90,200,130,.5)";
       document.body.appendChild(timersEl);
     }
+    // the reader card starts below the timers, which sit above its dimming
+    document.documentElement.style.setProperty("--av-timers-h", timersEl.offsetHeight + 30 + "px");
     const now = Date.now() / 1000;
     const esc = (t) => String(t).replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
     const row = (label, val, bright) =>
@@ -839,9 +845,10 @@ const AV = (() => {
   }
 
   /* ------------------------------ full-screen reader ----------------------------- */
-  // A recipe or a list, whole: a card over the dimmed face, scrollable,
-  // closed by a tap outside it, the close mark, Escape, or "close that"
-  // (the voice line's {"type": "show", "close": true}). Tinted with the mode.
+  // A recipe or a list, whole: a card over the dimmed face, below any
+  // timers, scrolled by dragging, closed by a double-tap anywhere on it, a
+  // tap outside it, the close mark, Escape, or "close that" (the voice
+  // line's {"type": "show", "close": true}). Tinted with the mode.
   let reader = null;
   A.showDoc = (title, md) => {
     if (reader) { reader.remove(); reader = null; }
@@ -850,9 +857,10 @@ const AV = (() => {
     reader = document.createElement("div");
     reader.style.cssText =
       "position:fixed;inset:0;z-index:80;background:rgba(0,6,3,.72);display:flex;" +
-      "align-items:center;justify-content:center;filter:var(--av-mode-filter,none)";
+      "align-items:center;justify-content:center;filter:var(--av-mode-filter,none);" +
+      "box-sizing:border-box;padding-top:var(--av-timers-h,0px)";
     reader.innerHTML =
-      '<div class="av-doc" style="position:relative;width:min(760px,92vw);max-height:88vh;overflow-y:auto;' +
+      '<div class="av-doc" style="position:relative;width:min(760px,92vw);max-height:calc(88vh - var(--av-timers-h,0px));overflow-y:auto;touch-action:pan-y;' +
       "padding:28px 30px 34px;border:1px solid rgba(90,200,130,.45);border-radius:10px;" +
       "background:rgba(6,20,12,.94);color:rgb(200,240,212);font:16px/1.6 'SF Mono',Menlo,Consolas,monospace;" +
       'box-shadow:0 0 40px rgba(60,200,120,.18)">' +
@@ -866,11 +874,19 @@ const AV = (() => {
         ".av-doc p{margin:.5em 0}.av-doc code{background:rgba(90,200,130,.12);padding:0 .3em;border-radius:3px}" +
         ".av-doc hr{border:0;border-top:1px solid rgba(90,200,130,.3);margin:1em 0}" }));
     void css;
+    let down = null, lastTap = 0;
     reader.addEventListener("pointerdown", (e) => {
       e.stopPropagation();
+      down = [e.clientX, e.clientY];
       if (e.target === reader || e.target.classList.contains("av-x")) A.showDoc(null);
     });
-    ["pointerup", "keydown"].forEach(t => reader.addEventListener(t, e => e.stopPropagation()));
+    reader.addEventListener("pointerup", (e) => {   // a double-tap (not a scroll drag) closes it
+      e.stopPropagation();
+      if (!down || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 12) { lastTap = 0; return; }
+      if (e.timeStamp - lastTap < 350) A.showDoc(null); else lastTap = e.timeStamp;
+    });
+    reader.addEventListener("pointercancel", () => { lastTap = 0; });   // the browser took it as a scroll
+    reader.addEventListener("keydown", e => e.stopPropagation());
     document.body.appendChild(reader);
   };
   addEventListener("keydown", (e) => { if (e.key === "Escape" && reader) A.showDoc(null); });
