@@ -973,6 +973,29 @@ const AV = (() => {
     fit();
   }
 
+  /* --------------------------------- version -------------------------------- */
+  // Small in the bottom right corner while the terminal is hidden: the app's
+  // version (it passes ?v=), else this face's build date (core.js's
+  // Last-Modified).
+  (async () => {
+    if (SHOT) return;
+    let t = Q.get("v") ? "v" + Q.get("v") : "";
+    if (!t) try {
+      const lm = (await fetch(new URL("core.js", ROOT))).headers.get("Last-Modified");
+      const d = lm && new Date(lm);
+      if (d && d.getFullYear() > 2000) t = "face " + d.toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+    } catch (e) { /* no build to show */ }
+    if (!t) return;
+    const css = document.createElement("style");
+    css.textContent = "#av-ver{position:fixed;right:10px;bottom:8px;z-index:40;pointer-events:none;" +
+      "font:11px/1 'SF Mono',Menlo,Consolas,monospace;letter-spacing:.06em;color:rgba(150,230,175,.35);" +
+      "filter:var(--av-mode-filter,none)}html.av-term-on #av-ver{display:none}";
+    document.head.appendChild(css);
+    const el = document.createElement("div");
+    el.id = "av-ver"; el.textContent = t;
+    document.body.appendChild(el);
+  })();
+
   /* ----------------------------- thinking sound ---------------------------- */
   let audio = null, sndBtn = null, playing = false;
   A._sndWant = true;
