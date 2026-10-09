@@ -939,7 +939,9 @@ const AV = (() => {
       "#av-term input{flex:1;min-width:0;background:none;border:0;outline:0;color:rgb(200,245,215);" +
       "font:inherit;caret-color:rgb(110,240,150)}" +
       "#av-term input::placeholder{color:rgba(110,180,135,.5)}" +
-      "#av-term .av-t-p{color:rgb(90,200,130)}";
+      "#av-term .av-t-p{color:rgb(90,200,130)}" +
+      "#av-term .av-t-add{background:none;border:0;padding:0 2px;font:inherit;font-size:20px;line-height:1;" +
+      "color:rgb(110,220,150);cursor:pointer}";
     document.head.appendChild(css);
     const el = document.createElement("div");
     el.id = "av-term";
@@ -947,11 +949,31 @@ const AV = (() => {
     el.style.bottom = DISPLAY ? "24px" : "48px";
     el.innerHTML = '<div class="av-t-log"></div>' +
       '<form autocomplete="off"><span class="av-t-p">&gt;</span>' +
-      '<input enterkeyhint="send" placeholder="message ' + A.name.toLowerCase() + '"></form>';
+      '<input enterkeyhint="send" placeholder="message ' + A.name.toLowerCase() + '">' +
+      '<button type="button" class="av-t-add" title="attach a file">+</button>' +
+      '<input type="file" class="av-t-file" hidden></form>';
     document.body.appendChild(el);
     term = { el, log: el.firstElementChild, input: el.querySelector("input") };
     // typing, scrolling, and taps here never reach the face's own handlers
     ["pointerdown", "pointerup", "keydown"].forEach(t => el.addEventListener(t, e => e.stopPropagation()));
+    // +: attach a file. In the app, Android's picker (the app uploads it);
+    // in a browser, the file chooser, sent over the socket. Either way it
+    // rides along with the next question, like a shared picture.
+    const picker = el.querySelector(".av-t-file");
+    el.querySelector(".av-t-add").addEventListener("click", () => {
+      if (DISPLAY) { if (window.JarvisApp && window.JarvisApp.pickFile) window.JarvisApp.pickFile(); }
+      else picker.click();
+    });
+    picker.addEventListener("change", () => {
+      const f = picker.files[0]; picker.value = "";
+      if (!f || !VI || !VI.ws || VI.ws.readyState !== 1) return;
+      const r = new FileReader();
+      r.onload = () => {
+        VI.ws.send(JSON.stringify({ type: "file", name: f.name, mime: f.type, data: String(r.result).split(",")[1] || "" }));
+        A.termLine("you", "[attached " + f.name + "]");
+      };
+      r.readAsDataURL(f);
+    });
     el.querySelector("form").addEventListener("submit", (e) => {
       e.preventDefault();
       const t = term.input.value.trim();
