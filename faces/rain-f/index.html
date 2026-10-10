@@ -37,9 +37,12 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 /* ============================================================
    FACE IN THE CODE (F)  ·  the Matrix-rain face, a woman's portrait
    A variant of faces/rain: everything is the same except the face
-   that surfaces in the rain, faces/rain-f/face.png: a stylised woman,
-   sculpted and lit procedurally by face.py beside it (no one's
-   likeness). Change a number there and re-run it to change her.
+   that surfaces in the rain, faces/rain-f/face.png: a high-contrast
+   woman, waist up, uncropped. Made from the source portrait with:
+     magick SRC -colorspace Gray -resize 1024x -clahe 16x16%+128+2 \
+       -morphology Erode Disk:4 -level 6%,100% face.png
+   (mild local contrast; the erode fattens eyes, nostrils, and lips so
+   they survive at glyph size; the level keeps the black black).
 
    Idles as slow digital rain; when the agent speaks, a face
    surfaces INSIDE the rain (glyphs brightening through a
@@ -71,7 +74,7 @@ const Q=new URLSearchParams(location.search);
 const SHOT=Q.get("shot");
 AV.init({mic:true});
 
-const GLYPH_PX=20, FACE_GLYPH_PX=12, TIERS=16;
+const GLYPH_PX=20, FACE_GLYPH_PX=7, TIERS=16;   // rain-f: a finer face grid (Rain uses 12) so her features resolve
 const GREEN=[0,255,70], HEAD=[205,255,205], AMBER=[255,176,64], RED=[255,46,46], TASK=[80,180,255], TASK_HEAD=[225,245,255];
 const RAIN_FADE_PER_SEC=170, MUTATE_PER_SEC=45;
 const RAIN_PROFILE={idle:[1.0,.80],listening:[.55,.45],thinking:[2.6,1.0],speaking:[.85,.55]};
