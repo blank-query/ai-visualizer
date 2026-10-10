@@ -608,7 +608,7 @@ const AV = (() => {
   }
   function viRelease() {
     const wasHeld = !!(VI && VI.held);
-    if (VI) VI.held = false;
+    if (VI) { VI.held = VI.latched = false; clearTimeout(VI.latchT); }
     // After "stop listening", ANY click on the orb brings hands-free
     // back, even a tap too quick to open the mic. Sent on release, so
     // a held press is still an ordinary push-to-talk turn first; and
@@ -661,6 +661,8 @@ const AV = (() => {
       cursorShow();
     }
     stage.style.touchAction = "none";
+    const TAP_MS = 350, LATCH_MAX_MS = 60000;   // a forgotten tap sends after 60 s
+    let orbDownAt = 0;   // timeStamp of the orb press in progress
     stage.addEventListener("pointerdown", (e) => {
       // A face may narrow this to its own visible shape (e.g. the
       // bioradial swarm) by setting A.hitCenterX/Y and A.hitRadius
@@ -681,10 +683,24 @@ const AV = (() => {
           return;
         }
       }
-      e.preventDefault(); viPress(false);
+      e.preventDefault();
+      // Tap to talk, tap again to send (like the desk unit); a hold
+      // still ends on release. The second tap sends on touch-down.
+      if (VI && VI.latched) { orbDownAt = 0; viRelease(); return; }
+      orbDownAt = e.timeStamp; viPress(false);
     });
     ["pointerup", "pointercancel", "pointerleave"].forEach(evt =>
-      stage.addEventListener(evt, () => viRelease()));
+      stage.addEventListener(evt, (e) => {
+        if (!orbDownAt) return;   // not an orb press, or already latched
+        const tap = e.type === "pointerup" && e.timeStamp - orbDownAt < TAP_MS;
+        orbDownAt = 0;
+        // A tap latches (the listening rings stay up); while paused a
+        // tap still just resumes, so it releases as before.
+        if (!tap || !VI || !VI.held || VI.hfMuted) return viRelease();
+        VI.latched = true;
+        clearTimeout(VI.latchT);
+        VI.latchT = setTimeout(() => { if (VI.latched) viRelease(); }, LATCH_MAX_MS);
+      }));
     // Clicks on the blank space around the orb, counted until they stop
     // (same as the phone app's taps), all silent, the color answers:
     // triple = hands-free on/off, double while hands-free = pause/resume,
