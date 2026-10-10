@@ -115,7 +115,14 @@ function barTargets(out){
    pushes grains outward FROM THE CENTER, hardest at the core, barely at
    the crust. Rising energy fires a blast transient that rebounds fast,
    so every syllable detonates. */
-const ORB_N=6200;
+// ?size= scales the orb. The swarm keeps the SAME DENSITY at any size:
+// the particle count follows the orb's on-screen area, measured against
+// how it looks at 1080p (orb image 430 px across, all 6200 particles).
+// The same 6200 in a phone's small orb read as noise. ?swarm= tunes the
+// density (0.1-1.5).
+const SIZE=Math.min(1.6,Math.max(.5,parseFloat(Q.get("size"))||1));
+const SWARM=Math.min(1.5,Math.max(.1,parseFloat(Q.get("swarm"))||1));
+const ORB_N=6200, ORB_REF=430;
 const orb={};
 function orbBuild(){
   const r32=(s=>{let a=s;return()=>{a|=0;a=a+0x6D2B79F5|0;
@@ -181,7 +188,11 @@ function orbRender(size,energy,breath,dt){
     d[i]=0;d[i+1]=0;d[i+2]=0;d[i+3]=0;
   }
   orb.touchedN=0;
-  for(let i=0;i<ORB_N;i++){
+  // a spread-out subset (stride, not the first n: the array holds the
+  // shell first, then the core), so the mix stays the same at any count
+  const n=Math.max(200,Math.min(ORB_N,Math.round(ORB_N*SWARM*(want/ORB_REF)**2)));
+  for(let k=0;k<n;k++){
+    const i=k*ORB_N/n|0;
     const r0=orb.r0[i];
     // radial displacement: core grains fly, crust holds (clamped bulge)
     const rd=Math.min(r0+push*Math.pow(1-r0,1.2)+.18*push,1.48);
@@ -529,7 +540,7 @@ function frame(dt){
   const roomT=AV.termShown?Math.min(H,AV.termTop):H;
   room=room==null?roomT:room+(roomT-room)*Math.min(1,.12*dt60);
   const cxp=W>>1, cyp=room>>1;
-  const innerR=Math.min(cxp,cyp)*.42;
+  const innerR=Math.min(cxp,cyp)*.42*SIZE;
   const maxLen=Math.min(cxp,cyp)*.65;
   // the orb is the tap-to-talk target; the space around it takes swipes
   AV.hitCenterX=cxp; AV.hitCenterY=cyp; AV.hitRadius=innerR;
