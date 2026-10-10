@@ -501,9 +501,14 @@ const peakH=new Float32Array(NUM_BARS);
 const prevH=new Float32Array(NUM_BARS);
 const targets=new Float32Array(NUM_BARS);
 const memH=new Float32Array(NUM_BARS);   // neighbour-blended bar heights
-const MEM_BLUR=2;                        // bars blended on each side
+const MEM_BLUR=6;                        // bars blended on each side (wide: speech swells whole lobes)
 const MEM_GAIN=.4;                       // how far speech pushes the membrane out (was 1.15)
 let memPhase=0;                          // slow organic wobble
+const LOBE_BEAT=[3,3.4,2.7,3.2];       // each lobe's own tempo, so they take turns
+const LOBE_AT=[.55,2.05,3.45,5.0];       // lobe angles: uneven, so it's lopsided
+const LOBE_SIZE=[1,.7,.88,.6];           // and unequal
+const LOBE_W=[.52,.46,.58,.42];            // widths (rad): wide = blunt, rounded lobes
+let memLvl=0;                            // smoothed speech level: the dance's tempo and swing
 const SHOW_BREATH_HALO=false;             // the faint always-on glow around the orb
 const SHOW_VOICE_HALO=false;              // the stacked glow that swells while speaking
 function thicknessMem(){return Math.max(2,3*Math.min(W,H)/1200);}
@@ -679,14 +684,16 @@ function frame(dt){
   drawHudArcs(cxp,cyp,innerR,workingFade);
 
   /* ---- the membrane (bio-radial) ----
-     1. blend each bar with its neighbours (circular smoothing) so the
-        outline swells in lobes instead of individual spikes;
-     2. add a slow multi-frequency wobble so it breathes and drifts even
-        when quiet, like a living cell;
+     1. blend each bar with its neighbours (wide circular smoothing) and
+        smooth the overall speech level, which sets the dance's tempo;
+     2. add four uneven lobes, each swelling on its own beat, with speech
+        pouring into the lobes, plus a faint ripple so it drifts when quiet;
      3. draw one closed curve through the tips with Catmull-Rom -> Bezier
-        segments: soft fill, glow stroke, and a fainter inner membrane. */
-  memPhase+=.012*dt60;
+        segments: a dark tinted gel body, a thick bright rim clipped to
+        the inside of the outline, and a soft outer glow. */
   const N=NUM_BARS, R=MEM_BLUR;
+  memLvl+=(barH.reduce((x,y)=>x+y,0)/N-memLvl)*Math.min(1,.08*dt60);
+  memPhase+=(.008+memLvl*.05)*dt60;      // speech quickens the dance
   for(let i=0;i<N;i++){
     let acc=0,wsum=0;
     for(let k=-R;k<=R;k++){
@@ -695,22 +702,31 @@ function frame(dt){
     }
     memH[i]=acc/wsum;
   }
-  const pts=[], inner=[];
+  const pts=[];
+  // The X parasite (the reference images, Metroid Fusion): a lopsided gel
+  // blob, four blunt lobes of unequal size at uneven angles, each
+  // swelling on its own beat. Idle hugs the orb like the original; speech
+  // pours into the lobes (not the body), so the dents between them deepen.
   for(let i=0;i<N;i++){
     const a=(i/N)*6.2832-Math.PI/2+rotation;
-    const wob=.035*Math.sin(3*a+memPhase)+.025*Math.sin(5*a-memPhase*1.3)
-             +.02*Math.sin(2*a+memPhase*.7);
-    const len=(memH[i]*MEM_GAIN+wob+.05)*maxLen;
+    let bump=0;
+    for(let k=0;k<4;k++){
+      const c=rotation+LOBE_AT[k]+.2*Math.sin(memPhase*.4+k*1.9);
+      let d=a-c; d=Math.atan2(Math.sin(d),Math.cos(d));
+      const g=Math.exp(-(d*d)/(LOBE_W[k]*LOBE_W[k]));
+      const beat=.5+.5*Math.sin(memPhase*LOBE_BEAT[k]+k*1.5708);
+      bump+=g*LOBE_SIZE[k]*(.02+.03*beat+memLvl*.55*(.35+.65*beat));
+    }
+    const len=(memH[i]*MEM_GAIN*.2+bump+.05+.008*Math.sin(5*a+memPhase*2.3))*maxLen;
     const r=innerR+Math.max(0,len);
     pts.push([cxp+Math.cos(a)*r,cyp+Math.sin(a)*r]);
-    const ri=innerR+Math.max(0,len*.55);
-    inner.push([cxp+Math.cos(a)*ri,cyp+Math.sin(a)*ri]);
     if(barH[i]>SPAWN_THRESHOLD&&barH[i]>prevH[i]+.05)
       spawnParticles(pts[i][0],pts[i][1],a,colorFor(barH[i]),1+(Math.random()*2|0));
   }
   prevH.set(barH);
   const level=memH.reduce((x,y)=>x+y,0)/N;
   const col=colorFor(Math.min(1,.25+level*.9));
+  const rgb=(al)=>`rgba(${col[0]},${col[1]},${col[2]},${al})`;
   const loop=(P)=>{                     // closed Catmull-Rom spline
     ctx.beginPath();ctx.moveTo(P[0][0],P[0][1]);
     for(let i=0;i<N;i++){
@@ -721,21 +737,17 @@ function frame(dt){
     }
     ctx.closePath();
   };
-  // soft body: radial gradient from the orb's edge out to the membrane
-  const g=ctx.createRadialGradient(cxp,cyp,innerR*.9,cxp,cyp,innerR+maxLen*.8);
-  g.addColorStop(0,`rgba(${col[0]},${col[1]},${col[2]},${.10+level*.14})`);
-  g.addColorStop(1,`rgba(${col[0]},${col[1]},${col[2]},0)`);
-  loop(pts);ctx.fillStyle=g;ctx.fill();
-  // glow, then the crisp membrane edge
-  ctx.lineJoin="round";
-  ctx.strokeStyle=`rgba(${col[0]},${col[1]},${col[2]},.16)`;
-  ctx.lineWidth=thicknessMem()*5;ctx.stroke();
-  ctx.strokeStyle=`rgba(${col[0]},${col[1]},${col[2]},${.55+level*.25})`;
-  ctx.lineWidth=thicknessMem();ctx.stroke();
-  // fainter inner membrane, lagging the outer one
-  loop(inner);
-  ctx.strokeStyle=`rgba(160,255,195,${.10+level*.18})`;
-  ctx.lineWidth=Math.max(1,thicknessMem()*.5);ctx.stroke();
+  // the gel: a dark tinted body filled right to the edge, then a thick
+  // bright rim on the INSIDE of the outline (clipped), so it reads as a
+  // solid wet membrane rather than a contour line
+  const rimW=thicknessMem()*(4+level*3);
+  loop(pts);ctx.fillStyle=rgb(.13+level*.1);ctx.fill();
+  ctx.save();ctx.clip();ctx.lineJoin="round";
+  ctx.strokeStyle=rgb(.22);ctx.lineWidth=rimW*4;ctx.stroke();
+  ctx.strokeStyle=rgb(.55+level*.2);ctx.lineWidth=rimW*1.6;ctx.stroke();
+  ctx.strokeStyle=`rgba(225,255,235,${.5+level*.3})`;ctx.lineWidth=rimW*.45;ctx.stroke();
+  ctx.restore();
+  ctx.strokeStyle=rgb(.14);ctx.lineWidth=thicknessMem()*4;ctx.stroke();   // soft outer glow
 
   drawParticles(dt60);
   // (bio-radial: no pulse ring either)
