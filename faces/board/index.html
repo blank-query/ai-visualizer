@@ -36,7 +36,9 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   canvas#stage{position:fixed;inset:0;width:100vw;height:100vh;display:block}
 
   /* ---------- HUD chrome ---------- */
-  .hud{position:fixed;inset:0;pointer-events:none;z-index:10;transition:opacity .7s}
+  .hud{position:fixed;inset:0;pointer-events:none;z-index:10;transition:opacity .7s;filter:var(--av-mode-filter,none)}
+  /* the terminal (core.js) owns the bottom of the screen while it's open */
+  html.av-term-on #echo,html.av-term-on #micline,html.av-term-on #hint{display:none}
   body.cine .hud{opacity:0}
   .corner{position:absolute;width:34px;height:34px;border:1px solid var(--chrome)}
   .corner.tl{top:18px;left:18px;border-right:none;border-bottom:none}
@@ -119,6 +121,11 @@ SPDX-License-Identifier: AGPL-3.0-or-later
    Driven by the voice bus through core.js (AV.state / AV.level).
    Space = the LIVE CINEMATIC flythrough (again = bail out); C = same.
    F = fullscreen; the fps meter is ?fps=1. ?demo=1 self-runs.
+   Background tasks: one violet packet per running task, circling the
+   chip on its own ring trace. Listening is THIS tab's mic (a press, or
+   hands-free hearing you), not the shared bus state. The chip is the
+   tap-to-talk target; swipes around it open and close the terminal,
+   and with the terminal up the board slides so the chip sits above it.
    ?shot=idle|thinking|speaking[&cine=1]
    &t=ms -> deterministic still for verification.
    ============================================================ */
@@ -144,6 +151,8 @@ const GREEN="#3ddc84", GREEN_HOT="#a6ffd0", AMBER="#e7c368", AMBER_HOT="#ffe9ae"
 const SPEAK_COLS=["#35e0ff","#9d7bff","#ff4d9d","#5fa8ff","#46e28a","#e7c368"];
 /* listening = cool input colors flowing INTO the chip */
 const LISTEN_COLS=["#35e0ff","#5fa8ff"], LISTEN_COOL="#35e0ff";
+/* background tasks = violet packets circling the chip */
+const TASK_COL="#b18cff", TASK_HOT="#efe6ff";
 /* thinking = the label scrambles through this set (monospace-safe glyphs) */
 const SCRAM="ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789#$%&@<>/*+=?";
 function hex2rgb(h){const n=parseInt(h.slice(1),16);return[n>>16,(n>>8)&255,n&255]}
@@ -159,13 +168,16 @@ let talkS=0, speakingNowG=false;    // eased talk fade + spawn-time speaking fla
 let listenS=0;                      // eased listening fade (cool cast + inward flow)
 let thinkS=0;                       // eased thinking fade (label matrix-scramble)
 let echoT=-1;                       // demo flavor: typed command while thinking
+let shift=0;                        // board slid up to clear the terminal (canvas px)
+const packets=[];                   // background-task packets
+const vis=()=>AV.listening?"listening":AV.state;   // this tab's own mic outranks the bus
 
 function targetEnergy(){
-  const s=AV.state, lvl=AV.level;
+  const s=vis(), lvl=AV.level;
   if(s==="thinking")return 1;
   if(s==="speaking")return Math.min(.97,.5+.5*Math.pow(lvl,.7));
   if(s==="listening")return .5;
-  return .25;
+  return AV.busyElsewhere?.4:.25;   // busy on another device: a little livelier
 }
 /* speech pulses need a fast ease; state changes keep the slow cinematic one */
 function easeTaus(){
@@ -186,7 +198,7 @@ function syncUsage(){
 
 function syncHUD(){
   const mode=$("statemode"),hint=$("hint");
-  const s=AV.state;
+  const s=vis();
   if(s==="thinking"){
     mode.innerHTML='THINKING<span class="spin"></span>';
     hint.querySelector(".proc").style.display="inline";hint.querySelector(".idlehint").style.display="none";
@@ -593,6 +605,58 @@ function spawnPulse(ti,inward){
   pulses.push({t,geo:inward?revGeo(t):null,inward:!!inward,d:0,sp:R(.14,.26)*Math.min(W,H)/1000,col});
 }
 
+/* ---------------- background tasks: packets on a ring trace ----------------
+   One violet packet per running task (AV.tasks), circling the chip on its
+   own ring trace (shown only while any run). A new one fades in; a finished
+   one flares and fades where it is. */
+function ringPt(u,x,y,w,h){
+  const P=2*(w+h);let d=((u%1)+1)%1*P;
+  if(d<w)return[x+d,y];d-=w;
+  if(d<h)return[x+w,y+d];d-=h;
+  if(d<w)return[x+w-d,y+h];d-=w;
+  return[x,y+h-d];
+}
+function drawPackets(n,dt){
+  const live=packets.filter(p=>!p.dying);
+  while(live.length<n){
+    // a third of the way round from the last one, so they never bunch up
+    const p={u:live.length?live[live.length-1].u+1/3:rnd(),fade:0,dying:false,flare:0};
+    packets.push(p);live.push(p);
+  }
+  while(live.length>n){const p=live.shift();p.dying=true;p.flare=1;}
+  const pad=cell*2.2, x=chip.x-pad, y=chip.y-pad, w=chip.w+pad*2, h=chip.h+pad*2;
+  let ringA=0;
+  for(const p of packets)ringA=Math.max(ringA,p.fade);
+  if(ringA>.01){
+    ctx.setLineDash([cell*.5,cell*.35]);
+    ctx.strokeStyle=rgba(TASK_COL,.35*ringA);ctx.lineWidth=Math.max(1.4,cell*.08);
+    ctx.strokeRect(x,y,w,h);
+    ctx.setLineDash([]);
+  }
+  const sp=glowSprites[TASK_COL]||(glowSprites[TASK_COL]=makeGlow("rgb(177,140,255)",64));
+  for(let k=packets.length-1;k>=0;k--){
+    const p=packets[k];
+    p.u+=dt/9000;
+    if(p.dying){p.fade-=dt/650;p.flare=Math.max(0,p.flare-dt/550);}
+    else p.fade=Math.min(1,p.fade+dt/550);
+    if(p.fade<=0&&p.dying){packets.splice(k,1);continue;}
+    const f=Math.max(0,p.fade);
+    for(let i=1;i<=30;i++){                           // the tail
+      const t=1-i/30, [ax,ay]=ringPt(p.u-i*.006,x,y,w,h);
+      ctx.fillStyle=rgba(TASK_COL,t*f*.9);
+      ctx.beginPath();ctx.arc(ax,ay,Math.max(1.2,cell*.1)*(.5+t),0,6.29);ctx.fill();
+    }
+    const [hx,hy]=ringPt(p.u,x,y,w,h), hs=cell*3;
+    ctx.globalAlpha=f;ctx.drawImage(sp,hx-hs/2,hy-hs/2,hs,hs);ctx.globalAlpha=1;
+    ctx.fillStyle=rgba(TASK_HOT,f);
+    ctx.beginPath();ctx.arc(hx,hy,Math.max(2.5,cell*.16),0,6.29);ctx.fill();
+    if(p.dying&&p.flare>0){
+      ctx.strokeStyle=rgba(TASK_COL,p.flare*.8);ctx.lineWidth=2;
+      ctx.beginPath();ctx.arc(hx,hy,6+(1-p.flare)*cell*2,0,6.29);ctx.stroke();
+    }
+  }
+}
+
 /* ---------------- the LIVE cinematic camera (Space) ----------------
    A ~25s scripted flythrough rendered over the LIVE simulation — whatever
    the board is doing (talking, listening, thinking) is what the lens sees.
@@ -710,7 +774,7 @@ function frame(dt){
   AV.tick(dt);
   now+=dt;
   usageT+=dt; if(usageT>=1000){usageT=0;syncUsage();}
-  if(AV.state!==busPrev){busPrev=AV.state;syncHUD();
+  if(vis()!==busPrev){busPrev=vis();syncHUD();
     if(AV.demo&&AV.state==="thinking")echoT=0;
     if(AV.demo&&AV.state==="idle"){echoT=-1;$("echo").innerHTML=""}}
   const Et=targetEnergy();
@@ -728,7 +792,7 @@ function frame(dt){
 
   /* motion energy, state-aware: idle = a near-sleeping crawl,
      talking = calm cruise, thinking = the full-speed storm */
-  const busS=AV.state;
+  const busS=vis();
   const speakingNow=busS==="speaking";
   speakingNowG=speakingNow;
   lvlS+=(AV.level-lvlS)*(1-Math.exp(-dt/90));
@@ -736,7 +800,7 @@ function frame(dt){
   const listeningNow=busS==="listening";
   listenS+=((listeningNow?1:0)-listenS)*(1-Math.exp(-dt/380));
   const thinkT=busS==="thinking";   // scramble eases in slow, RESOLVES fast
-  thinkS+=((thinkT?1:0)-thinkS)*(1-Math.exp(-dt/(thinkT?380:160)));
+  thinkS+=((thinkT?1:AV.busyElsewhere?.3:0)-thinkS)*(1-Math.exp(-dt/(thinkT?380:160)));
   const ME=speakingNow?E*.38:listeningNow?E*.55:busS==="idle"?E*.2:E;
 
   /* spawn: the chip is the heart — most pulses leave from it.
@@ -768,8 +832,16 @@ function frame(dt){
   cineFade+=((cine?1:0)-cineFade)*(1-Math.exp(-dt/450));
   const camOn=!!cine;
   camZ=camOn?cam.z:1;
+  // With the terminal open (core.js) the board slides up so the chip
+  // centers in the space above it, gliding there and back. The chip is
+  // the tap-to-talk target (core.js works in CSS px, the canvas in DPR px).
+  const shiftT=AV.termShown?Math.max(0,(H-AV.termTop*DPR)/2):0;
+  shift+=(shiftT-shift)*Math.min(1,dt/140);
+  AV.hitCenterX=(chip.x+chip.w/2)/DPR; AV.hitCenterY=(chip.y+chip.h/2-shift)/DPR;
+  AV.hitRadius=chip.w*.5/DPR;
   ctx.clearRect(0,0,W,H);
   ctx.save();
+  if(!camOn)ctx.translate(0,-shift);
   if(camOn){
     // the live cinematic camera: same simulation, re-rendered as crisp
     // vectors inside the culled view — macro shots never go soft
@@ -992,9 +1064,16 @@ function frame(dt){
       ctx.beginPath();ctx.roundRect(x-pad,y-pad,w+pad*2,h+pad*2,8+pad*.4);ctx.stroke();
       return true;
     });
+    drawPackets(AV.tasks||0,dt);
   }
 
   ctx.restore();   // camera off — everything below is screen-space post
+  // the terminal is see-through: the board under it fades out so its text reads
+  if(shift>1){
+    const top=H-shift*2, g=ctx.createLinearGradient(0,top-40,0,top+H*.08);
+    g.addColorStop(0,"rgba(2,7,5,0)");g.addColorStop(1,"rgba(2,7,5,.9)");
+    ctx.fillStyle=g;ctx.fillRect(0,top-40,W,H-top+40);
+  }
 
   /* roaming specular sheen — the light breathing across the lens */
   {
