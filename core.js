@@ -513,6 +513,8 @@ const AV = (() => {
             && VI.nextPlayTime > VI.playCtx.currentTime - 0.3))) return;
         const input = e.inputBuffer.getChannelData(0);
         const i16 = new Int16Array(input.length);
+        // the tap beep goes out as silence (MIC_RAW has no echo cancellation)
+        if (performance.now() >= (VI.quietUntil || 0))
         for (let i = 0; i < input.length; i++) {
           const s = Math.max(-1, Math.min(1, input[i]));
           i16[i] = s < 0 ? s * 32768 : s * 32767;
@@ -606,6 +608,23 @@ const AV = (() => {
       VI.ws.send(JSON.stringify({ type: "press" }));
     });
   }
+  // A tapped press is listening: one short soft tone. ponytail: whole
+  // 256 ms capture blocks go silent for 450 ms (beep plus a block), so a
+  // word started within ~0.3 s of the beep can lose its onset; an
+  // AudioWorklet with per-sample timing is the upgrade.
+  function viBeep() {
+    VI.quietUntil = performance.now() + 450;
+    try {
+      const ctx = new AudioContext(), o = ctx.createOscillator(), g = ctx.createGain(), t = ctx.currentTime;
+      o.frequency.value = 660;
+      g.gain.setValueAtTime(0, t);
+      g.gain.linearRampToValueAtTime(0.2, t + 0.02);
+      g.gain.linearRampToValueAtTime(0, t + 0.12);
+      o.connect(g); g.connect(ctx.destination);
+      o.onended = () => ctx.close();
+      o.start(t); o.stop(t + 0.13);
+    } catch (e) {}
+  }
   function viRelease() {
     const wasHeld = !!(VI && VI.held);
     if (VI) { VI.held = VI.latched = false; clearTimeout(VI.latchT); }
@@ -661,7 +680,8 @@ const AV = (() => {
       cursorShow();
     }
     stage.style.touchAction = "none";
-    const TAP_MS = 350, LATCH_MAX_MS = 60000;   // a forgotten tap sends after 60 s
+    // a forgotten tap sends after 120 s, backtalk's hands_free_timeout_s
+    const TAP_MS = 350, LATCH_MAX_MS = 120000;
     let orbDownAt = 0;   // timeStamp of the orb press in progress
     stage.addEventListener("pointerdown", (e) => {
       // A face may narrow this to its own visible shape (e.g. the
@@ -700,6 +720,7 @@ const AV = (() => {
         VI.latched = true;
         clearTimeout(VI.latchT);
         VI.latchT = setTimeout(() => { if (VI.latched) viRelease(); }, LATCH_MAX_MS);
+        viBeep();
       }));
     // Clicks on the blank space around the orb, counted until they stop
     // (same as the phone app's taps), all silent, the color answers:
