@@ -872,7 +872,7 @@ const AV = (() => {
       log.appendChild(last);
     }
     const body = last.lastElementChild;
-    if (text) body.innerHTML += (body.innerHTML ? " " : "") + mdInline(esc(text));
+    if (text) body.innerHTML += (body.innerHTML ? " " : "") + linkify(mdInline(esc(text)));
     if (show && show.path) {
       const b = document.createElement("button");
       b.type = "button"; b.className = "av-t-open";
@@ -893,6 +893,19 @@ const AV = (() => {
     .replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
     .replace(/(^|[\s(])[*_]([^*_\s][^*_]*)[*_](?=[\s).,;:!?]|$)/g, "$1<i>$2</i>")
     .replace(/\[\[([^\]|]+)(\|([^\]]+))?\]\]/g, (m, a, b, c) => c || a);
+  // http(s) URLs in already-escaped HTML become links. A URL stops at
+  // markup or an escaped quote/bracket, and sheds trailing punctuation and
+  // an unmatched ")" so "see https://x.com/a." links the right thing.
+  const linkify = (h) => h.replace(/https?:\/\/(?:(?!&(?:lt|gt|quot);)[^\s<>"'`])+/g, (u) => {
+    let tail = "";
+    for (;;) {
+      const m = u.match(/[.,;:!?]+$/);
+      if (m) { tail = m[0] + tail; u = u.slice(0, -m[0].length); continue; }
+      if (u.endsWith(")") && u.split("(").length < u.split(")").length) { tail = ")" + tail; u = u.slice(0, -1); continue; }
+      break;
+    }
+    return `<a href="${u}" target="_blank" rel="noopener noreferrer">${u}</a>${tail}`;
+  });
   function mdBlock(md) {
     const out = []; let list = null;
     const close = () => { if (list) { out.push(`</${list}>`); list = null; } };
@@ -984,6 +997,7 @@ const AV = (() => {
       "#av-term .av-t-you{color:rgb(200,235,210)}" +
       "#av-term .av-t-open{display:block;margin:6px 0 2px;padding:5px 12px;font:inherit;cursor:pointer;" +
       "color:rgb(150,240,180);background:rgba(90,200,130,.12);border:1px solid rgba(90,200,130,.45);border-radius:4px}" +
+      "#av-term a{color:inherit;text-decoration:underline}" +
       "#av-term form{display:flex;align-items:center;gap:8px;padding:9px 12px;" +
       "border:1px solid rgba(90,200,130,.35);border-radius:4px;background:rgba(8,22,14,.75);" +
       "-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px)}" +
