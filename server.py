@@ -56,6 +56,7 @@ Ctrl-C stops.
 import json
 import math
 import mimetypes
+import os
 import sys
 import threading
 import time
@@ -97,7 +98,9 @@ DEFAULTS = {
 def load_config():
     cfg = dict(DEFAULTS)
     try:
-        user = json.loads((HERE / "ai-visualizer.json").read_text())
+        # AI_VISUALIZER_CONFIG: a second face (another agent) on its own file.
+        path = os.environ.get("AI_VISUALIZER_CONFIG") or HERE / "ai-visualizer.json"
+        user = json.loads(Path(path).read_text())
         for k, v in user.items():
             cfg[k] = v
     except FileNotFoundError:
