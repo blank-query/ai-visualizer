@@ -30,6 +30,16 @@
                    adaptively normalized — use this for motion)
      AV.samples    Float32Array(64), 0..1 normalized waveform ring
      AV.alert      bool, optional attention signal
+     AV.listening  bool, this tab's mic is taking a question (draw that,
+                   not state "listening")
+     AV.tasks      running background tasks (one indicator each)
+     AV.termShown / AV.termTop
+                   the terminal is open and starts this far down (CSS
+                   px): fit the focal object in the space above it
+     AV.hitCenterX/Y, AV.hitRadius
+                   set by the face each frame (CSS px): the focal object
+                   is the tap-to-talk target, the space around it takes
+                   swipes (terminal) and multi-taps (hands-free)
      AV.micLevel   0..1 your microphone (only if init({mic:true}))
      AV.name       display name from config ("JARVIS" by default)
      AV.label      the dotted chip label ("J.A.R.V.I.S.")
@@ -223,6 +233,10 @@ const AV = (() => {
     A.busyElsewhere = !forThisTab
       && (raw.state === "thinking" || raw.state === "speaking");
     if (!forThisTab) A.state = "idle";
+    // What a face draws as "listening": this tab recording (a press) or its
+    // open mic mid-utterance (hands-free), never the global bus state,
+    // which every tab polls. The demo script stands in for both.
+    A.listening = !!(A.recording || A.hfCapturing || (DEMO && A.state === "listening"));
     // Not "listening": that's while YOU'RE recording, nothing of
     // Jarvis's own to interrupt yet, and the button popping in the
     // instant you press reads as noise, not a control.
