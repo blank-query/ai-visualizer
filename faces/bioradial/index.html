@@ -343,7 +343,7 @@ function drawSonar(cxp,cyp,innerR,maxLen,dt60,spawn){
     rp[0]+=1.6*dt60;rp[1]-=(spawn?.55:4)*dt60;      // fade fast once listening ends
     if(rp[1]>0&&rp[0]<maxR*1.1){
       ctx.strokeStyle=`rgba(74,240,122,${rp[1]/255})`;
-      ctx.lineWidth=2;
+      ctx.lineWidth=3.5;   // sir 2026-10-10: thicker, easier to see (was 2)
       ctx.beginPath();ctx.arc(cxp,cyp,rp[0],0,6.29);ctx.stroke();
     }
   }
