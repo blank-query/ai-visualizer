@@ -60,6 +60,13 @@ SPDX-License-Identifier: AGPL-3.0-or-later
               association) rides the live voice envelope and the
               crescent breathes with it
    alert      everything bleeds red
+   tasks      one cyan probe per running background task, circling
+              the crescent on a comet tail; TASKS in the panel counts them
+
+   Listening is THIS tab's mic (a press, or hands-free hearing you), not
+   the shared bus state, and it sends sonar rings off the crescent. The
+   brain is the tap-to-talk target; swipes around it open and close the
+   terminal, and with the terminal up the brain fits above it.
    Keys: F = fullscreen.
    ============================================================ */
 
@@ -106,7 +113,7 @@ const N_TENDRILS=46;
 const PROFILE={idle:[1.4,.38],listening:[2.6,.50],thinking:[13.0,.95],speaking:[9.0,.78]};
 const BRIGHT_CAP=1.18;                 // color can never clip to white
 const PANEL_ROWS=CLUSTERS.slice(0,N_REGIONS).map((c,i)=>[c[0],i])
-  .concat([["STT",null],["TTS",null],["MEMORY",null],["BUS",null]]);
+  .concat([["STT",null],["TTS",null],["MEMORY",null],["TASKS",null],["BUS",null]]);
 const MONO="13px 'SF Mono',Menlo,Consolas,monospace";
 const MONO_SM="11px 'SF Mono',Menlo,Consolas,monospace";
 const MONO_LG="bold 16px 'SF Mono',Menlo,Consolas,monospace";
@@ -220,7 +227,9 @@ function project(p,t,out){
 }
 
 /* ---------------- per-frame ---------------- */
-let listenAmt=0, now=0;
+let listenAmt=0, now=0, room=null;
+const sonar=[];let sonarCool=0, sonarWas=false;
+const probes=[];
 // Eased state fades (the board's grammar): every state change crossfades
 // instead of cutting, and these drive colour, brightness, and drift speed.
 let listenS=0, thinkS=0, speakS=0;
@@ -243,7 +252,14 @@ function splat(xi,yi,r,g,b,f){
 function frame(dt){
   AV.tick(dt);
   now+=dt;
-  const state=AV.state, env=AV.env, alert=AV.alert;
+  // what this tab shows: its own mic outranks the bus state
+  const state=AV.listening?"listening":AV.state, env=AV.env, alert=AV.alert;
+  // With the terminal open (core.js) the brain fits the space above it,
+  // gliding there and back; it's also the tap-to-talk target.
+  const roomT=AV.termShown?Math.min(H,AV.termTop):H;
+  room=room==null?roomT:room+(roomT-room)*Math.min(1,dt/140);
+  cy=room*.52|0;scalePx=Math.min(W,room)*.52;
+  AV.hitCenterX=cx; AV.hitCenterY=cy; AV.hitRadius=scalePx*.6;
   const t=now/1000, dts=dt/1000;
   const lt=state==="listening"?AV.micLevel:0;
   listenAmt+=(lt-listenAmt)*Math.min(1,dt/120);
@@ -252,7 +268,8 @@ function frame(dt){
   listenS+=((state==="listening"?1:0)-listenS)*(1-Math.exp(-dt/380));
   speakS +=((state==="speaking" ?1:0)-speakS )*(1-Math.exp(-dt/380));
   const thinkT=state==="thinking";
-  thinkS +=((thinkT?1:0)-thinkS)*(1-Math.exp(-dt/(thinkT?300:160)));
+  // busy on another device: a quarter of the thinking flood
+  thinkS +=((thinkT?1:AV.busyElsewhere?.25:0)-thinkS)*(1-Math.exp(-dt/(thinkT?300:160)));
   warp+=dts*(0.55+1.30*thinkS+0.45*speakS+0.20*listenS);
 
   /* heat + cascade + traveling dots */
@@ -401,6 +418,10 @@ function frame(dt){
     const y=proj9[kk][1]+(proj9[kk+1][1]-proj9[kk][1])*frac;
     fg.beginPath();fg.arc(x,y,3,0,6.29);fg.fill();
   }
+  live[0]=CRESCENT_C[0];live[1]=CRESCENT_C[1];live[2]=0;
+  project(live,warp,_pr);
+  drawSonar(_pr[0],_pr[1],state==="listening",dt);
+  drawProbes(_pr[0],_pr[1],AV.tasks||0,dt);
   fg.globalCompositeOperation="source-over";
 
   /* ---- 4) bloom the WHOLE field (lines included) + composite ---- */
@@ -420,9 +441,70 @@ function frame(dt){
   ctx.drawImage(frame._halo[hk],_pr[0]-hs/2,_pr[1]-hs/2,hs,hs);
   ctx.globalAlpha=1;ctx.globalCompositeOperation="source-over";
 
+  // the terminal is see-through: the field under it fades out so its text reads
+  if(room<H-1){
+    const g=ctx.createLinearGradient(0,room-40,0,room+H*.08);
+    g.addColorStop(0,"rgba(2,3,10,0)");g.addColorStop(1,"rgba(2,3,10,.9)");
+    ctx.fillStyle=g;ctx.fillRect(0,room-40,W,H-room+40);
+  }
   drawLabels(alert);
   drawChrome(state,alert,env,t);
   if(alert)drawAlertFrame();
+}
+
+/* listening: cool sonar rings off the crescent, the first the moment it
+   starts, then one every ~1.1-1.7 s; they fade fast once it ends. Drawn
+   into the field, so they bloom like everything else. */
+function drawSonar(x,y,on,dt){
+  if(on&&!sonarWas)sonarCool=0;
+  sonarWas=on;
+  if(on&&(sonarCool-=dt)<=0){sonar.push([scalePx*.32,1]);sonarCool=1100+Math.random()*600;}
+  for(const r of sonar){
+    r[0]+=scalePx*.33*dt/1000;r[1]-=(on?.42:3)*dt/1000;
+    if(r[1]<=0)continue;
+    fg.strokeStyle=`rgba(70,185,255,${.85*r[1]})`;fg.lineWidth=3.5;
+    fg.beginPath();fg.ellipse(x,y,r[0],r[0]*.92,0,0,6.29);fg.stroke();
+  }
+  for(let i=sonar.length-1;i>=0;i--)if(sonar[i][1]<=0)sonar.splice(i,1);
+}
+/* background tasks: one cyan probe per running task (AV.tasks), circling
+   the crescent on a comet tail. A new one fades in; a finished one
+   flares outward and fades away. */
+function drawProbes(x,y,n,dt){
+  const live=probes.filter(p=>!p.dying);
+  while(live.length<n){
+    // spaced a third of a turn from the last one, so they never bunch up
+    const p={a:live.length?live[live.length-1].a+2.1:Math.random()*6.2832,rf:.40+.07*(probes.length%3),
+             spd:6.2832/(8+Math.random()*3),fade:0,dying:false,flare:0};
+    probes.push(p);live.push(p);
+  }
+  while(live.length>n){const p=live.shift();p.dying=true;p.flare=1;}
+  const dts=dt/1000;
+  for(let k=probes.length-1;k>=0;k--){
+    const p=probes[k];
+    p.a+=p.spd*dts;
+    if(p.dying){p.fade-=1.5*dts;p.flare=Math.max(0,p.flare-1.8*dts);}
+    else p.fade=Math.min(1,p.fade+1.8*dts);
+    if(p.fade<=0&&p.dying){probes.splice(k,1);continue;}
+    const R=scalePx*p.rf, f=Math.max(0,p.fade);
+    const pt=a=>[x+Math.cos(a)*R,y+Math.sin(a)*R*.92];
+    for(let i=0;i<30;i++){
+      const t=i/29, [px,py]=pt(p.a-Math.PI*.6*(1-t));
+      fg.fillStyle=`rgba(60,200,255,${t*t*f*.8})`;
+      fg.beginPath();fg.arc(px,py,1+t*2.5,0,6.29);fg.fill();
+    }
+    const [hx,hy]=pt(p.a);
+    for(let i=3;i>0;i--){
+      fg.fillStyle=`rgba(60,200,255,${f/(i+2)})`;
+      fg.beginPath();fg.arc(hx,hy,5+i*4,0,6.29);fg.fill();
+    }
+    fg.fillStyle=`rgba(210,245,255,${f})`;
+    fg.beginPath();fg.arc(hx,hy,6,0,6.29);fg.fill();
+    if(p.dying&&p.flare>0){
+      fg.strokeStyle=`rgba(120,220,255,${p.flare*.8})`;fg.lineWidth=2;
+      fg.beginPath();fg.arc(hx,hy,6+(1-p.flare)*40,0,6.29);fg.stroke();
+    }
+  }
 }
 
 /* ---------------- labels + chrome (crisp, post-bloom) ---------------- */
@@ -454,6 +536,7 @@ function chipFor(name,ri,state,alert){
   if(name==="STT")return state==="listening"?["LIVE",GREEN]:["RDY",dim2(INK,.8)];
   if(name==="TTS")return state==="speaking"?["LIVE",GREEN]:["RDY",dim2(INK,.8)];
   if(name==="MEMORY")return(state==="thinking"||flick)?["READ",CYAN]:["OK",dim2(INK,.8)];
+  if(name==="TASKS")return AV.tasks?[AV.tasks+" RUN",CYAN]:["NONE",dim2(INK,.8)];
   return["OK",(now/1000|0)%4?GREEN:dim2(GREEN,.7)];
 }
 function dim2(c,f){return[c[0]*f|0,c[1]*f|0,c[2]*f|0]}
@@ -533,7 +616,8 @@ function drawChrome(state,alert,env,t){
   // meters
   micHist.push(state==="listening"?AV.micLevel:AV.micLevel*.25);
   micHist=micHist.slice(-46);
-  const bx=28,by=H-46;
+  // above the terminal while it's open (room is H when it isn't)
+  const bx=28,by=room-46;
   ctx.font=MONO_SM;
   ctx.fillStyle=state==="listening"?dim(AMBER,1):dim(ink,.7);
   ctx.fillText("MIC IN",bx,by-16);
@@ -555,14 +639,14 @@ function drawChrome(state,alert,env,t){
   const label=alert?"ALERT":state.toUpperCase();
   ctx.font=MONO;ctx.textAlign="center";
   ctx.fillStyle=alert?dim(RED,1):dim(inkB,.9);
-  ctx.fillText(`// ${label}`,W/2,H-40);
+  ctx.fillText(`// ${label}`,W/2,room-40);
   ctx.textAlign="left";
 
   // fps readout (honesty meter)
   fpsN++;
   if(now-fpsT>=1000){fpsTxt=`${fpsN} FPS`;fpsN=0;fpsT=now;}
   ctx.font=MONO_SM;ctx.fillStyle=dim(ink,.5);
-  ctx.fillText(fpsTxt,28,H-74);
+  ctx.fillText(fpsTxt,28,room-74);
 }
 
 function drawAlertFrame(){
