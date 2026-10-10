@@ -42,10 +42,10 @@ SPDX-License-Identifier: AGPL-3.0-or-later
    connecting polygon web, concentric frequency rings, a pulse
    ring, a drifting star-and-nebula galaxy behind everything.
 
-   idle       sonar ripples, a radar scanner arc, twinkling
-              constellation stars — alive, never frozen
-   listening / thinking
-              an amber data-tick wheel + rotating HUD arcs
+   idle       twinkling constellation stars: alive, never frozen
+   listening  sonar ripples off the orb (this tab's mic only)
+   thinking   an amber data-tick wheel + rotating HUD arcs
+   tasks      one teal satellite per running background task
    speaking   the starburst erupts on the live waveform and the
               orb explodes from the inside, per syllable
    alert      red pulsing rings + vignette
@@ -308,17 +308,21 @@ function drawGalaxy(dt60){
 
 /* ---------------- idle + working ornaments ---------------- */
 const ripples=[];let rippleCool=0;
-function drawSonar(cxp,cyp,innerR,maxLen,dt60){
-  if(--rippleCool<=0){
+let sonarWas=false;
+function drawSonar(cxp,cyp,innerR,maxLen,dt60,spawn){
+  // the first ring the moment listening starts, then one every ~1.1-1.7 s
+  if(spawn&&!sonarWas)rippleCool=0;
+  sonarWas=spawn;
+  if(spawn&&--rippleCool<=0){
     ripples.push([innerR*1.15,110]);
-    rippleCool=150+Math.random()*90|0;
+    rippleCool=65+Math.random()*35|0;
   }
   const maxR=innerR+maxLen;
   for(const rp of ripples){
-    rp[0]+=1.6*dt60;rp[1]-=.55*dt60;
+    rp[0]+=1.6*dt60;rp[1]-=(spawn?.55:4)*dt60;      // fade fast once listening ends
     if(rp[1]>0&&rp[0]<maxR*1.1){
       ctx.strokeStyle=`rgba(74,240,122,${rp[1]/255})`;
-      ctx.lineWidth=2;
+      ctx.lineWidth=3.5;
       ctx.beginPath();ctx.arc(cxp,cyp,rp[0],0,6.29);ctx.stroke();
     }
   }
@@ -326,30 +330,45 @@ function drawSonar(cxp,cyp,innerR,maxLen,dt60){
     if(ripples[i][1]<=0||ripples[i][0]>=maxR*1.1)ripples.splice(i,1);
 }
 
-let scanA=0;
-function drawScanner(cxp,cyp,innerR,fade,dt60){
-  scanA+=(2*Math.PI/(60*6))*dt60;
-  if(fade<.01)return;
-  const radius=innerR*1.45;
-  const span=Math.PI*.75, segs=44;
-  for(let i=0;i<segs;i++){
-    const t=i/(segs-1);
-    const a=scanA-span*(1-t);
-    const alpha=t*t*fade*.86;
-    if(alpha<=0)continue;
-    ctx.fillStyle=`rgba(140,255,185,${alpha})`;
-    ctx.beginPath();
-    ctx.arc(cxp+Math.cos(a)*radius,cyp+Math.sin(a)*radius,
-            Math.max(1,1+t*3),0,6.29);
-    ctx.fill();
+/* ---------------- satellites ----------------
+   One teal satellite per running background task (AV.tasks), any state.
+   A new one fades in; a finished one flares outward and fades away. */
+const sats=[];
+const SAT_COL=[90,210,255];
+function drawSatellites(cxp,cyp,innerR,n,dt60){
+  const live=sats.filter(x=>!x.dying);
+  while(live.length<n){
+    const x={a:Math.random()*6.2832,rf:1.45+.12*(sats.length%3),
+             spd:(2*Math.PI/(60*(7+Math.random()*3))),fade:0,dying:false,flare:0};
+    sats.push(x);live.push(x);
   }
-  const hx=cxp+Math.cos(scanA)*radius, hy=cyp+Math.sin(scanA)*radius;
-  for(let i=4;i>0;i--){
-    ctx.fillStyle=`rgba(190,255,220,${fade/(i+2)})`;
-    ctx.beginPath();ctx.arc(hx,hy,4+i*3,0,6.29);ctx.fill();
+  while(live.length>n){const x=live.shift();x.dying=true;x.flare=1;}
+  for(let k=sats.length-1;k>=0;k--){
+    const x=sats[k];
+    x.a+=x.spd*dt60;
+    if(x.dying){x.fade-=.025*dt60;x.flare=Math.max(0,x.flare-.03*dt60);}
+    else x.fade=Math.min(1,x.fade+.03*dt60);
+    if(x.fade<=0&&x.dying){sats.splice(k,1);continue;}
+    const R=innerR*x.rf, f=Math.max(0,x.fade);
+    const span=Math.PI*.55, segs=30;
+    for(let i=0;i<segs;i++){
+      const t=i/(segs-1), a=x.a-span*(1-t), al=t*t*f*.7;
+      if(al<=0)continue;
+      ctx.fillStyle=`rgba(${SAT_COL[0]},${SAT_COL[1]},${SAT_COL[2]},${al})`;
+      ctx.beginPath();ctx.arc(cxp+Math.cos(a)*R,cyp+Math.sin(a)*R,Math.max(1,1+t*2.5),0,6.29);ctx.fill();
+    }
+    const hx=cxp+Math.cos(x.a)*R, hy=cyp+Math.sin(x.a)*R;
+    for(let i=4;i>0;i--){
+      ctx.fillStyle=`rgba(160,230,255,${f/(i+2)})`;
+      ctx.beginPath();ctx.arc(hx,hy,4+i*3,0,6.29);ctx.fill();
+    }
+    ctx.fillStyle=`rgba(225,248,255,${f})`;
+    ctx.beginPath();ctx.arc(hx,hy,4,0,6.29);ctx.fill();
+    if(x.dying&&x.flare>0){
+      ctx.strokeStyle=`rgba(160,230,255,${x.flare*.8})`;ctx.lineWidth=2;
+      ctx.beginPath();ctx.arc(hx,hy,6+(1-x.flare)*40,0,6.29);ctx.stroke();
+    }
   }
-  ctx.fillStyle=`rgba(235,255,245,${fade})`;
-  ctx.beginPath();ctx.arc(hx,hy,4,0,6.29);ctx.fill();
 }
 
 const constel=[];
@@ -485,7 +504,7 @@ function drawAlert(cxp,cyp,innerR,dt60){
 }
 
 /* ---------------- state fades + orb gate ---------------- */
-let rotation=0, idleFade=0, workingFade=0, breathPhase=0;
+let rotation=0, idleFade=0, workingFade=0, breathPhase=0, room=null;
 let imgEnergy=0, orbEnergy=0, noiseFloor=.05, gateOpen=false, gateT0=null;
 let orbFont=null;
 
@@ -505,22 +524,31 @@ function frame(dt){
     else peakH[i]*=Math.pow(.98,dt60);
   }
 
-  const cxp=W>>1, cyp=H>>1;
+  // With the terminal open (core.js) the orb centers in the space above
+  // it, gliding there and back.
+  const roomT=AV.termShown?Math.min(H,AV.termTop):H;
+  room=room==null?roomT:room+(roomT-room)*Math.min(1,.12*dt60);
+  const cxp=W>>1, cyp=room>>1;
   const innerR=Math.min(cxp,cyp)*.42;
   const maxLen=Math.min(cxp,cyp)*.65;
+  // the orb is the tap-to-talk target; the space around it takes swipes
+  AV.hitCenterX=cxp; AV.hitCenterY=cyp; AV.hitRadius=innerR;
   rotation+=.002*dt60;
 
   /* state-driven fades: speaking = both off (bars + halo own the motion),
-     listening/thinking = working ornaments, idle = idle ornaments */
+     listening = sonar, thinking = working ornaments, idle = idle ornaments */
   const st=AV.state;
+  const listening=AV.listening;
   let idleT=0,workT=0;
-  if(st==="speaking"){idleT=0;workT=0}
-  else if(st==="listening"||st==="thinking"){idleT=0;workT=1}
+  if(listening||st==="speaking"){idleT=0;workT=0}
+  else if(st==="thinking"){idleT=0;workT=1}
   else{idleT=1;workT=0}
+  // busy on another device: a faint trickle of the working ornaments
+  if(AV.busyElsewhere)workT=Math.max(workT,.25);
   const ease=(cur,tg,up)=>cur+(tg-cur)*(tg>cur?up:.30)*dt60;
   idleFade=ease(idleFade,idleT,.08);
   workingFade=ease(workingFade,workT,.12);
-  if(idleT>.5)drawSonar(cxp,cyp,innerR,maxLen,dt60);
+  drawSonar(cxp,cyp,innerR,maxLen,dt60,listening);
 
   drawRings(cxp,cyp,innerR,maxLen);
 
@@ -565,8 +593,9 @@ function frame(dt){
     }
   }
 
-  // idle-only movement: radar scanner + twinkling constellation
-  drawScanner(cxp,cyp,innerR,idleFade,dt60);
+  // idle-only movement: twinkling constellation (the radar scanner is
+  // retired: it read as a background-task satellite)
+  drawSatellites(cxp,cyp,innerR,AV.tasks||0,dt60);
   drawConstellation(cxp,cyp,innerR,idleFade,dt60);
   // working-state movement: data-tick wheel + HUD arcs
   drawTicks(cxp,cyp,innerR,workingFade,dt60);
@@ -671,7 +700,8 @@ function drawUsage(){
   ctx.save();
   ctx.font=`${fs}px 'SF Mono',Menlo,Consolas,monospace`;
   ctx.textAlign="left";ctx.textBaseline="alphabetic";
-  let y=H-16-(rows.length-1)*(fs+6);
+  // top-left while the terminal holds the bottom of the screen
+  let y=AV.termShown?16+fs:H-16-(rows.length-1)*(fs+6);
   for(const r of rows){
     ctx.fillStyle="rgb(78,120,96)";
     ctx.fillText(r.label,18,y);
